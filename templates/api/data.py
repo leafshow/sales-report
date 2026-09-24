@@ -1,9 +1,22 @@
-"""Vercel Serverless Function — 从 DuckDB 读取数据返回 JSON"""
-from __future__ import annotations
+"""Vercel Serverless Function — 从 DuckDB 读取数据返回 JSON（Flask 入口）"""
 import json
 from pathlib import Path
 
+from flask import Flask, jsonify, Response, request
+
 DB_PATH = Path(__file__).parent / "data" / "report.duckdb"
+
+app = Flask(__name__)
+
+
+def _find_db():
+    """Vercel 上 includeFiles 可能把文件放在函数根或 api/ 下，逐个探测"""
+    here = Path(__file__).parent
+    for p in [here / "data" / "report.duckdb", here / "report.duckdb",
+              here.parent / "data" / "report.duckdb"]:
+        if p.exists():
+            return p
+    return here / "data" / "report.duckdb"
 
 
 def _load_con():
@@ -11,12 +24,19 @@ def _load_con():
         import duckdb
     except ImportError:
         return None, "duckdb module not installed"
-    if not DB_PATH.exists():
-        return None, "database not found, run build script first"
-    return duckdb.connect(str(DB_PATH)), None
+    db_path = _find_db()
+    if not db_path.exists():
+        return None, f"database not found at {db_path}"
+    try:
+        return duckdb.connect(str(db_path), read_only=True), None
+    except duckdb.Error:
+        return None, f"cannot open database (read-only fs): {db_path}"
 
 
-def handler(event, context):
+@app.route("/api/data", methods=["GET", "OPTIONS"])
+def handler():
+    if request.method == "OPTIONS":
+        return _resp(204, None)
     con, err = _load_con()
     if err:
         return _resp(404, {"error": err})
@@ -140,11 +160,12 @@ def handler(event, context):
 
 
 def _resp(status_code, body):
-    return {
-        "statusCode": status_code,
-        "headers": {
-            "Content-Type": "application/json; charset=utf-8",
-            "Access-Control-Allow-Origin": "*",
-        },
-        "body": json.dumps(body, ensure_ascii=False),
-    }
+    resp = Response(
+        json.dumps(body, ensure_ascii=False) if body is not None else "",
+        status=status_code,
+        mimetype="application/json",
+    )
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    resp.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+    resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    return resp

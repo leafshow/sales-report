@@ -1,6 +1,16 @@
 {
+  "builds": [
+    {
+      "src": "api/data.py",
+      "use": "@vercel/python",
+      "config": { "includeFiles": "**/report.duckdb" }
+    },
+    { "src": "index.html", "use": "@vercel/static" },
+    { "src": "favicon.ico", "use": "@vercel/static" },
+    { "src": "favicon.png", "use": "@vercel/static" }
+  ],
   "routes": [
-    { "src": "/api/data(.*)", "dest": "/api/data$1" },
-    { "src": "/(.*)", "dest": "/index.html" }
+    { "src": "/api/data", "dest": "/api/data.py" },
+    { "src": "/(.*)", "dest": "/$1" }
   ]
 }

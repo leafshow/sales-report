@@ -20,3 +20,5 @@ templates/api/data/data_*.json
 
 # 已弃用
 index.embedded.html
+.vercel
+.env*
