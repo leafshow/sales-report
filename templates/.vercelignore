@@ -1,0 +1,5 @@
+# 本地开发工具（不部署到 Vercel）
+server.py
+all_shop_template.html
+# 数据库（可选：如果不想把 5MB 数据库上传，可取消下一行注释）
+# api/data/report.duckdb

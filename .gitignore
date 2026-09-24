@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.env
+
+# OS
+.DS_Store
+
+# 数据源（本地 Excel，不入库）
+data/
+*.xlsx
+
+# 构建生成的数据文件
+# 注意：首次部署需手动 git add report.duckdb
+templates/api/data/report.duckdb
+templates/api/data/data.json
+templates/api/data/data_*.json
+
+# 已弃用
+index.embedded.html
