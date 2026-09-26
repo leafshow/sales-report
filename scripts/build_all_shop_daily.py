@@ -439,5 +439,11 @@ if __name__=="__main__":
     finally:
         con.close()
     latest=next(x for x in data["overall"] if x["date"]==data["quality"]["latestCompleteDate"])
+    # 同步数据库到函数读取位置（api/report.duckdb，随 @vercel/python 打包）
+    api_db = DB_PATH.parent.parent / "report.duckdb"
+    if api_db != DB_PATH:
+        import shutil
+        shutil.copy2(DB_PATH, api_db)
+        print(f"同步: {api_db}")
     print(OUT); print(json.dumps(data["quality"],ensure_ascii=False,indent=2))
-    print(f"latest={latest['date']} gmv={latest['gmv']:.2f} html_size={OUT.stat().st_size} json_size={api_json.stat().st_size}")
+    print(f"latest={latest['date']} gmv={latest['gmv']:.2f} html_size={OUT.stat().st_size} db_size={config.DB_PATH.stat().st_size}")
