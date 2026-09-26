@@ -6,7 +6,7 @@ from pathlib import Path
 
 # ── 路径 ──────────────────────────────────────────────────────────────────────
 # INPUT：数据源目录（Excel 文件存放位置）
-#   - 默认：项目根目录下 data/ 目录（首次使用前请将 Excel 文件放入）
+#   - 默认：~/Desktop/JD-Date/Import（商智导出目录）
 #   - 也可通过环境变量 DATA_DIR 覆盖，例如：
 #     DATA_DIR=/path/to/jd-export python3 scripts/build_all_shop_daily.py
 import os
@@ -14,7 +14,7 @@ _INPUT_OVERRIDE = os.environ.get('DATA_DIR', '')
 if _INPUT_OVERRIDE:
     INPUT = Path(_INPUT_OVERRIDE)
 else:
-    INPUT = Path(__file__).parent.parent / 'data'
+    INPUT = Path.home() / 'Desktop' / 'JD-Date' / 'Import'
 # OUT：生成的报表 HTML（自动定位到 templates/index.html）
 OUT = Path(__file__).parent.parent / 'templates' / 'index.html'
 # TEMPLATE：HTML 模板源码（含 __DATA__ 占位符，用于离线内嵌版）
