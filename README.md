@@ -1,6 +1,8 @@
-# 京东 POP 店铺销售日报
+# 多平台店铺销售日报
 
-基于京东商智导出的商品明细数据，通过 **DuckDB + Vercel Serverless Function** 生成交互式销售日报。
+基于京东商智、唯品会导出的商品明细数据，通过 **DuckDB + Vercel Serverless Function（Flask）** 生成交互式销售日报。支持多平台、多店铺整合展示与平台切换。
+
+**线上地址**：https://sales-report-self.vercel.app
 
 ---
 
@@ -9,38 +11,56 @@
 ```
 ┌──────────────┐     fetch      ┌──────────────────┐     read     ┌────────────────┐
 │ index.html   │ ──────────────→│ api/data.py      │─────────────→│ report.duckdb  │
-│   45KB       │←──── JSON ─────│ (Serverless)     │←────────────│    ~5MB        │
+│   ~48KB      │←──── JSON ─────│ (Flask Function) │←──read_only──│   ~5.5MB       │
 └──────────────┘                └──────────────────┘              └────────────────┘
+      数据源: ~/Desktop/Platform-Date/{JD,VIP}/Import/*.xlsx
+             └── scripts/build_all_shop_daily.py 构建入库 ──┘
 ```
 
 | 组件 | 大小 | 说明 |
 |------|------|------|
-| `index.html` | 45KB | 轻量 HTML，运行时 fetch `/api/data` 加载数据 |
-| `api/data.py` | 6KB | Vercel Serverless Function，读 DuckDB 返回 JSON |
-| `report.duckdb` | ~5MB | DuckDB 数据库（10 张表），构建时自动生成 |
+| `index.html` | ~48KB | 轻量 HTML，运行时 fetch `/api/data` 加载数据 |
+| `api/data.py` | ~7KB | Flask 入口（`app`），读 DuckDB（read_only）返回 JSON |
+| `api/report.duckdb` | ~5.5MB | 函数打包读取的数据库副本（构建后自动同步） |
+| `api/data/report.duckdb` | ~5.5MB | 构建主输出（10 张表） |
+
+> ⚠️ Vercel 文件系统只读，duckdb 必须 `connect(path, read_only=True)`；
+> ⚠️ 新版 Python runtime 只支持 Flask/ASGI `app` 入口，不再支持裸 `handler`。
+
+---
+
+## 数据平台与店铺
+
+| 平台 | 店铺 | 指标口径 |
+|------|------|----------|
+| 京东 POP（6 店） | 飞鹤成人 / 完达山 / 维维豆奶粉 / 怡佳悦选 / 北纬47° / 西麦食品饮料 | 商智官方合计行；含转化率、客单价、UV价值、退款、加购、搜索 |
+| 唯品会（2 店） | 维维食品特卖 / 西麦食品特卖 | 明细求和；仅销售额/销售量/客户数/商详UV，类目记为「未分类」，退款等缺失指标置 0 |
+
+- 两平台同名品牌（维维/西麦）为**不同店铺主体**，独立展示不合并。
+- 前端顶部「平台」切换器：全部平台 / 京东 / 唯品会，联动店铺列表、KPI 与图表。
 
 ---
 
 ## 目录结构
 
 ```
-db-fetch-report/
+sales-report/
 ├── templates/                     # ★ Vercel Root Directory
 │   ├── index.html                 # 轻量 HTML（运行时 fetch /api/data）
 │   ├── all_shop_template.html     # HTML 模板源码（.vercelignore 排除）
 │   ├── server.py                  # 本地开发服务器（.vercelignore 排除）
-│   ├── vercel.json                # Vercel 路由：/api/data → function，/* → index
+│   ├── vercel.json                # builds + routes（Flask function + static）
 │   ├── _redirects                 # SPA fallback
-│   ├── .vercelignore              # Vercel 部署排除规则
+│   ├── .vercelignore              # 部署排除规则
 │   ├── favicon.ico / .png
 │   └── api/
-│       ├── data.py                # Serverless Function
-│       ├── requirements.txt       # duckdb>=1.0.0
-│       └── data/
-│           └── report.duckdb      # 主数据库（10 张表）
+│       ├── data.py                # Flask Function（app + /api/data 路由）
+│       ├── requirements.txt       # flask + duckdb
+│       ├── report.duckdb          # ★ 函数打包读取的库（构建后自动同步）
+│       └── data/report.duckdb     # 构建主输出
 ├── scripts/
-│   ├── config.py                  # ⚙️ 配置中心
-│   ├── build_all_shop_daily.py    # 构建脚本（Excel → DuckDB + HTML）
+│   ├── config.py                  # ⚙️ 配置中心（平台目录/店铺/阈值/窗口）
+│   ├── build_all_shop_daily.py    # 构建脚本（多平台 Excel → DuckDB + HTML）
 │   ├── start-server.sh            # 本地服务器启动
 │   ├── open-report.command        # macOS 双击启动
 │   └── view-report.command        # macOS 后台启动
@@ -55,61 +75,49 @@ db-fetch-report/
 
 ## 快速开始
 
-### 本地使用
+### 日常更新（标准流程）
 
 ```bash
-# 1. 构建（Excel → DuckDB + HTML）
-cd scripts
-DATA_DIR=~/Desktop/JD-Date python3 build_all_shop_daily.py
+cd ~/Documents/GitHub/sales-report
 
-# 2. 启动本地服务器（静态文件 + /api/data API）
-./start-server.sh
+# 1. 构建（自动读取两个平台目录，自动同步 db 到 api/）
+python3 scripts/build_all_shop_daily.py
 
-# 3. 浏览器打开 http://127.0.0.1:8081/index.html
-#    ⚠️ 不要直接双击 HTML 文件，必须通过 http:// 访问
+# 2. 提交推送（push 即自动触发 Vercel 部署）
+git add -A && git add -f templates/api/report.duckdb templates/api/data/report.duckdb
+git commit -m "report $(date +%m-%d)" && git push
 ```
 
-### 部署到 Vercel
+### 本地预览
 
 ```bash
-# 1. 本地构建
-DATA_DIR=~/Desktop/JD-Date python3 scripts/build_all_shop_daily.py
-
-# 2. 推送代码和数据库
-git add templates/ scripts/ docs/ README.md .gitignore
-git add templates/api/data/report.duckdb
-git commit -m "report $(date +%Y-%m-%d)"
-git push
+cd templates && python3 server.py
+# 浏览器打开 http://127.0.0.1:8081（强刷 Cmd+Shift+R）
+# ⚠️ 不要直接双击 HTML，必须通过 http:// 访问
 ```
 
-**Vercel Dashboard 配置：**
+### 数据源目录
 
-| 配置项 | 值 |
-|--------|-----|
-| Root Directory | `db-fetch-report/templates` |
-| Framework Preset | Other |
-| Build Command | 留空 |
-| Output Directory | 留空 |
-| Python Runtime | 3.11+（自动） |
+默认（`scripts/config.py`）：
 
-`.vercelignore` 自动排除 `server.py` 和 `all_shop_template.html`。
+| 平台 | 目录 | 环境变量覆盖 |
+|------|------|--------------|
+| 京东 | `~/Desktop/Platform-Date/JD/Import` | `DATA_DIR_JD`（兼容旧 `DATA_DIR`） |
+| 唯品会 | `~/Desktop/Platform-Date/VIP/Import` | `DATA_DIR_VIP` |
+
+文件命名：`{店铺名}_商品明细_{YYYY-MM-DD}[_sku].xlsx`（`_sku` 后缀京东有、唯品会无）。
 
 ---
 
-## 数据更新
+## Vercel 配置
 
-```bash
-# 1. 将新日期 Excel 放入数据源目录（或 DATA_DIR 指向的目录）
-#    命名格式：{店铺名}_商品明细_{YYYY-MM-DD}_sku.xlsx
+| 配置项 | 值 |
+|--------|-----|
+| Root Directory | `templates` |
+| Framework Preset | Other |
+| Build Command | 留空 |
 
-# 2. 重新构建
-DATA_DIR=~/Desktop/JD-Date python3 scripts/build_all_shop_daily.py
-
-# 3. 推送更新（只需提交 DuckDB 文件）
-git add templates/api/data/report.duckdb
-git commit -m "update $(date +%Y-%m-%d)"
-git push
-```
+`.vercelignore` 自动排除 `server.py`、`all_shop_template.html`。
 
 ---
 
@@ -117,53 +125,32 @@ git push
 
 | 配置项 | 说明 |
 |--------|------|
-| `INPUT` | 数据源目录（默认 `data/`，可通过 `DATA_DIR` 环境变量覆盖） |
-| `SHOPS` | 店铺列表（增减店铺只改这里） |
-| `ALERT_RULES` | 四级预警规则阈值 |
+| `PLATFORM_DIRS` | 各平台数据源目录 |
+| `SHOPS` | 店铺列表 `(显示名, 简称, 排序, 平台)`——增删店铺只改这里，前端文案自动跟随店铺数 |
+| `PLATFORMS` | 平台显示名（前端平台切换器） |
+| `ALERT_RULES` | 预警规则阈值 |
 | `OPP_MIN_VISITORS` / `OPP_CONV_RATIO` | 机会品识别条件 |
 | `RECENT_DAYS` / `RESEARCH_DAYS` | 时间窗口大小 |
-| `TOP_SKU_POOL` / `DAILY_SHIFT_LIMIT` | 展示数量上限 |
 | `DB_PATH` | DuckDB 数据库路径 |
-| `OUT` | 生成的 HTML 输出路径 |
-| `TEMPLATE` | HTML 模板路径 |
 
 ---
 
-## DuckDB 表结构
-
-| 表名 | 行数 | 内容 |
-|------|------|------|
-| `meta` | 3 | 生成时间、店铺列表、日期列表 |
-| `quality` | 18 | 数据质量检查结果 |
-| `overall` | ~23 | 每日六店铺汇总（含 baseline/week） |
-| `shop_daily` | ~138 | 每日每店铺明细 |
-| `categories` | ~744 | 类目汇总（shop × 三级类目） |
-| `top_skus` | ~2,228 | TOP SKU 列表 |
-| `movers` | ~2,867 | 升降榜（risers + fallers） |
-| `alerts` | ~288 | 预警记录 |
-| `charts` | 14 | SVG 图表（ALL + 6店各2个） |
-| `optimization` | ~58 | 7日优化研究扁平化数据 |
-
----
-
-## 功能模块（14 个）
+## 报表模块
 
 | # | 模块 | 说明 |
 |---|------|------|
-| 1 | 经营结论 | 自动 headline + 5条 insight |
-| 2 | 核心 KPI | 10 项指标，日环比 / 前7日均值 / 上周同日 |
-| 3 | GMV 归因 | 访客 × 转化率 × 客单价 乘法分解 |
-| 4 | 7日优化研究 | 近7日 vs 前7日，店铺增长质量 + 机会品 + 集中度 |
-| 5 | GMV 趋势 | SVG 柱状图，点击日期联动 |
-| 6 | 转化率趋势 | SVG 折线图，与 GMV 同步选中 |
-| 7 | 店铺表现 | 条形占比图 + 详细指标表 |
-| 8 | 类目结构 | 一/二/三级类目 GMV 汇总 |
-| 9 | TOP SKU | 按 GMV 排序，支持店铺筛选 |
-| 10 | 升降榜 | 日环比增长/下滑 TOP10 |
-| 11 | 预警系统 | 高危/关注/SKU/机会 四级预警 |
-| 12 | 全周期总览 | 每日汇总大表 |
-| 13 | 数据质量 | 7 项完整性检查 |
-| 14 | 筛选器 | 日期下拉 + 店铺下拉，全局联动 |
+| 1 | 核心指标 | GMV/件数/单量/客户数/访客/转化/客单价/UV价值，环比+前7日均值+上周同日 |
+| 2 | GMV 归因 | 访客×转化×客单价乘法归因 |
+| 3 | 7日优化研究 | 增长质量、反复流量浪费、头部依赖 |
+| 4 | GMV/转化趋势 | 平台与店铺切换联动 |
+| 5 | 店铺当日表现 | 贡献率、环比、访客、转化 |
+| 6 | 类目结构 | 一/二/三级类目汇总（唯品会记「未分类」） |
+| 7 | TOP SKU | 按 GMV 排序，支持店铺筛选 |
+| 8 | 升降榜 | 日环比增长/下滑 |
+| 9 | 预警系统 | 高危/关注/SKU/机会四级 |
+| 10 | 全周期总览 | 每日汇总 |
+| 11 | 数据质量 | 完整性/新鲜度检查；数据不全时顶部黄色警告条列出缺失日期、缺失店铺与空文件（0 行导出） |
+| 12 | 筛选器 | 平台 + 日期 + 店铺三级联动 |
 
 ---
 
@@ -174,6 +161,6 @@ git push
 | 🔴 高危 | GMV下滑 | 环比 ≥20% 且 ≥¥500 |
 | 🟡 关注 | 流量下滑 | 环比 ≥30% 且 ≥100人 |
 | 🟡 关注 | 转化走弱 | 低于前日 75% 且下降 ≥1pp |
-| 🟡 关注 | 退款偏高 | 退款率 ≥5% 且 ≥¥300 |
+| 🟡 关注 | 退款偏高 | 退款率 ≥5% 且 ≥¥300（唯品会无退款数据，不触发） |
 | ⚪ SKU | SKU大幅下滑 | 减少 ≥¥500 且降幅 ≥50% |
 | 🔵 机会 | 高流量低转化 | 访客 ≥100 且转化 < 整体 ×75% |

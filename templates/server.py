@@ -50,6 +50,7 @@ class Handler(SimpleHTTPRequestHandler):
                     except: quality[k] = v
         shops = json.loads(meta.get("shops", "[]"))
         dates = json.loads(meta.get("dates", "[]"))
+        shop_display = {s["raw"]: s["display"] for s in shops}
 
         def parse_json(v):
             try: return json.loads(v) if v else None
@@ -67,7 +68,7 @@ class Handler(SimpleHTTPRequestHandler):
 
         shop_daily = {}
         for row in con.sql("SELECT * FROM shop_daily ORDER BY date").fetchall():
-            rec = {"date": row[0], "shopRaw": row[1], "skuCount": row[2], "gmv": row[3],
+            rec = {"date": row[0], "shopRaw": row[1], "shopDisplay": shop_display.get(row[1], row[1]), "skuCount": row[2], "gmv": row[3],
                    "units": row[4], "orders": row[5], "buyers": row[6], "visitors": row[7],
                    "conversion": row[8], "aov": row[9], "uvValue": row[10],
                    "refundAmount": row[11], "refundRate": row[12],
@@ -77,15 +78,16 @@ class Handler(SimpleHTTPRequestHandler):
         categories = {}
         for row in con.sql("SELECT * FROM categories ORDER BY date").fetchall():
             categories.setdefault(row[0], []).append({
-                "path": row[1], "l1": row[2], "l2": row[3], "l3": row[4],
+                "path": row[1], "shopRaw": row[1].split("/")[0], "l1": row[2], "l2": row[3], "l3": row[4],
+                "category1": row[2], "category2": row[3], "category3": row[4],
                 "gmv": row[5], "units": row[6], "orders": row[7],
-                "buyerCount": row[8], "visitors": row[9], "refundAmount": row[10],
+                "skuCount": row[8], "visitors": row[9], "refundAmount": row[10],
             })
 
         top_skus = {}
         for row in con.sql("SELECT * FROM top_skus ORDER BY date,gmv DESC").fetchall():
             top_skus.setdefault(row[0], []).append({
-                "shopRaw": row[1], "sku": row[2], "name": row[3],
+                "shopRaw": row[1], "shopDisplay": shop_display.get(row[1], row[1]), "sku": row[2], "name": row[3],
                 "gmv": row[4], "units": row[5], "visitors": row[6],
                 "conversion": row[7], "uvValue": row[8], "refundAmount": row[9],
             })
@@ -94,7 +96,7 @@ class Handler(SimpleHTTPRequestHandler):
         for row in con.sql("SELECT * FROM movers ORDER BY date").fetchall():
             key = row[1] + "s"
             movers.setdefault(row[0], {}).setdefault(key, []).append({
-                "shopRaw": row[2], "sku": row[3], "name": row[4],
+                "shopRaw": row[2], "shopDisplay": shop_display.get(row[2], row[2]), "sku": row[3], "name": row[4],
                 "previousGmv": row[5], "gmv": row[6], "delta": row[7],
             })
 
@@ -121,8 +123,10 @@ class Handler(SimpleHTTPRequestHandler):
 
         return {
             "generatedAt": meta.get("generatedAt", ""),
-            "sourceDir": "京东商智导出",
-            "shops": shops, "dates": dates,
+            "sourceDir": meta.get("sourceDir", "多平台商品明细（京东商智 + 唯品会）"),
+            "shops": shops,
+            "platforms": json.loads(meta.get("platforms", '{"jd":"京东","vip":"唯品会"}')),
+            "dates": dates,
             "overall": overall, "shopDaily": shop_daily,
             "categories": categories, "topSkus": top_skus,
             "movers": movers, "alerts": alerts,

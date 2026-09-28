@@ -5,16 +5,17 @@
 from pathlib import Path
 
 # ── 路径 ──────────────────────────────────────────────────────────────────────
-# INPUT：数据源目录（Excel 文件存放位置）
-#   - 默认：~/Desktop/JD-Date/Import（商智导出目录）
-#   - 也可通过环境变量 DATA_DIR 覆盖，例如：
-#     DATA_DIR=/path/to/jd-export python3 scripts/build_all_shop_daily.py
+# 各平台数据源目录（Excel 文件存放位置）
+#   - 也可通过环境变量覆盖：DATA_DIR_JD / DATA_DIR_VIP
 import os
-_INPUT_OVERRIDE = os.environ.get('DATA_DIR', '')
-if _INPUT_OVERRIDE:
-    INPUT = Path(_INPUT_OVERRIDE)
-else:
-    INPUT = Path.home() / 'Desktop' / 'JD-Date' / 'Import'
+PLATFORM_DIRS = {
+    'jd':  Path(os.environ.get('DATA_DIR_JD',  Path.home() / 'Desktop' / 'Platform-Date' / 'JD'  / 'Import')),
+    'vip': Path(os.environ.get('DATA_DIR_VIP', Path.home() / 'Desktop' / 'Platform-Date' / 'VIP' / 'Import')),
+}
+# 兼容旧变量：DATA_DIR 覆盖京东目录
+if os.environ.get('DATA_DIR', ''):
+    PLATFORM_DIRS['jd'] = Path(os.environ['DATA_DIR'])
+INPUT = PLATFORM_DIRS['jd']  # 兼容旧引用
 # OUT：生成的报表 HTML（自动定位到 templates/index.html）
 OUT = Path(__file__).parent.parent / 'templates' / 'index.html'
 # TEMPLATE：HTML 模板源码（含 __DATA__ 占位符，用于离线内嵌版）
@@ -25,20 +26,27 @@ API_DATA_DIR = Path(__file__).parent.parent / 'templates' / 'api' / 'data'
 DB_PATH = API_DATA_DIR / 'report.duckdb'
 
 # ── 文件匹配 ──────────────────────────────────────────────────────────────────
-# 商品明细文件命名规则：{店铺名}_商品明细_{日期}_sku.xlsx
-FILE_PATTERN = r'^(.+)_商品明细_(\d{4}-\d{2}-\d{2})_sku\.xlsx$'
+# 京东：{店铺名}_商品明细_{日期}_sku.xlsx；唯品会：{店铺名}_商品明细_{日期}.xlsx
+FILE_PATTERN = r'^(.+)_商品明细_(\d{4}-\d{2}-\d{2})(?:_sku)?\.xlsx$'
 
 # ── 店铺列表 ──────────────────────────────────────────────────────────────────
-# 格式：{Excel文件名中的店铺名} : (显示名, 简称, 排序序号)
-# 增减店铺只需在此增删行，排序序号决定下拉框顺序
+# 格式：{Excel文件名中的店铺名} : (显示名, 简称, 排序序号, 平台)
+# 增减店铺只需在此增删行，排序序号决定下拉框顺序；platform ∈ {'jd','vip'}
 SHOPS = {
-    '飞鹤成人奶粉旗舰店': ('飞鹤成人奶粉旗舰店', '飞鹤', 10),
-    '完达山成人奶粉旗':   ('完达山成人奶粉旗舰店', '完达山', 20),
-    '维维豆奶粉旗舰店':   ('维维豆奶粉旗舰店', '维维', 30),
-    '怡佳悦选旗舰店':     ('怡佳悦选旗舰店', '怡佳悦选', 40),
-    '北纬 47°旗舰店':     ('北纬47°旗舰店', '北纬47°', 50),
-    '西麦食品饮料旗舰店':  ('西麦食品饮料旗舰店', '西麦', 60),
+    # 京东 POP
+    '飞鹤成人奶粉旗舰店':   ('飞鹤成人奶粉旗舰店', '飞鹤', 10, 'jd'),
+    '完达山成人奶粉旗':     ('完达山成人奶粉旗舰店', '完达山', 20, 'jd'),
+    '维维豆奶粉旗舰店':     ('维维豆奶粉旗舰店', '维维(JD)', 30, 'jd'),
+    '怡佳悦选旗舰店':       ('怡佳悦选旗舰店', '怡佳悦选', 40, 'jd'),
+    '北纬 47°旗舰店':       ('北纬47°旗舰店', '北纬47°', 50, 'jd'),
+    '西麦食品饮料旗舰店':   ('西麦食品饮料旗舰店', '西麦(JD)', 60, 'jd'),
+    # 唯品会
+    '维维食品特卖旗舰店':   ('维维食品特卖旗舰店', '维维(VIP)', 70, 'vip'),
+    '西麦食品特卖旗舰店':   ('西麦食品特卖旗舰店', '西麦(VIP)', 80, 'vip'),
 }
+
+# 平台显示名（前端平台切换器用）
+PLATFORMS = {'jd': '京东', 'vip': '唯品会'}
 
 # ── 数据字段 ──────────────────────────────────────────────────────────────────
 # 参与计算和对比的数值字段
