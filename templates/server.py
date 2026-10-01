@@ -123,7 +123,7 @@ class Handler(SimpleHTTPRequestHandler):
 
         return {
             "generatedAt": meta.get("generatedAt", ""),
-            "sourceDir": meta.get("sourceDir", "多平台商品明细（京东商智 + 唯品会）"),
+            "sourceDir": meta.get("sourceDir", "多平台导出（京东商智 + 唯品会 + 拼多多）"),
             "shops": shops,
             "platforms": json.loads(meta.get("platforms", '{"jd":"京东","vip":"唯品会"}')),
             "dates": dates,

@@ -15,7 +15,7 @@
 |------|------|------|
 | `meta` | 3 | 生成时间、店铺列表、日期列表 |
 | `quality` | 18 | 数据质量检查结果 |
-| `overall` | ~23 | 每日六店铺汇总（含 baseline/week） |
+| `overall` | ~23 | 每日全店铺汇总（含 baseline/week） |
 | `shop_daily` | ~138 | 每日每店铺明细 |
 | `categories` | ~744 | 类目汇总（shop × 三级类目） |
 | `top_skus` | ~2,228 | TOP SKU 列表 |

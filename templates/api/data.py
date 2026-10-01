@@ -148,7 +148,7 @@ def handler():
 
         result = {
             "generatedAt": meta_rows.get("generatedAt", ""),
-            "sourceDir": meta_rows.get("sourceDir", "多平台商品明细（京东商智 + 唯品会）"),
+            "sourceDir": meta_rows.get("sourceDir", "多平台导出（京东商智 + 唯品会 + 拼多多）"),
             "shops": shops, "platforms": json.loads(meta_rows.get("platforms", '{"jd":"京东","vip":"唯品会"}')), "dates": dates,
             "overall": overall, "shopDaily": shop_daily,
             "categories": categories, "topSkus": top_skus,
