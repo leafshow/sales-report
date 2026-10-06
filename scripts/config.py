@@ -9,9 +9,10 @@ from pathlib import Path
 #   - 也可通过环境变量覆盖：DATA_DIR_JD / DATA_DIR_VIP
 import os
 PLATFORM_DIRS = {
-    'jd':  Path(os.environ.get('DATA_DIR_JD',  Path.home() / 'Desktop' / 'Platform-Date' / 'JD'  / 'Import')),
-    'vip': Path(os.environ.get('DATA_DIR_VIP', Path.home() / 'Desktop' / 'Platform-Date' / 'VIP' / 'Import')),
-    'pdd': Path(os.environ.get('DATA_DIR_PDD', Path.home() / 'Desktop' / 'Platform-Date' / 'PDD' / 'Import')),
+    'jd':  Path(os.environ.get('DATA_DIR_JD',  Path.home() / 'Desktop' / 'Platform-Date' / 'JD')),
+    'vip': Path(os.environ.get('DATA_DIR_VIP', Path.home() / 'Desktop' / 'Platform-Date' / 'VIP')),
+    'pdd': Path(os.environ.get('DATA_DIR_PDD', Path.home() / 'Desktop' / 'Platform-Date' / 'PDD')),
+    'jd_self': Path(os.environ.get('DATA_DIR_JD_SELF', Path.home() / 'Desktop' / 'Platform-Date' / 'JD_SELF')),
 }
 # 兼容旧变量：DATA_DIR 覆盖京东目录
 if os.environ.get('DATA_DIR', ''):
@@ -31,6 +32,10 @@ DB_PATH = API_DATA_DIR / 'report.duckdb'
 FILE_PATTERN = r'^(.+)_商品明细_(\d{4}-\d{2}-\d{2})(?:_sku)?\.xlsx$'
 # 拼多多：{店铺名}_商品数据_{统计日期}.csv（单日商品维度快照，60 列含访客/浏览/收藏/同行均值）
 FILE_PATTERN_PDD = r'^(.+)_商品数据_(\d{4}-\d{2}-\d{2})\.csv$'
+# 京东自营：{供应商名}_自营商品明细_{日期}.xlsx（供应商视角库存/出库明细，店铺维度取表内「店铺名称」列）
+FILE_PATTERN_JD_SELF = r'^(.+)_自营商品明细_(\d{4}-\d{2}-\d{2})\.xlsx$'
+# 京东自营流量表（经营状况）：{供应商名}_经营状况商品明细_{日期}.xlsx（商智标准字段）
+FILE_PATTERN_JD_SELF_TRAFFIC = r'^(.+)_经营状况商品明细_(\d{4}-\d{2}-\d{2})\.xlsx$'
 
 # ── 店铺列表 ──────────────────────────────────────────────────────────────────
 # 格式：{(平台, 文件名店铺名)} : (显示名, 简称, 排序序号)
@@ -51,10 +56,50 @@ SHOPS = {
     ('pdd', '完达山怡佳永盛专卖店'): ('完达山怡佳永盛专卖店', '完达山(PDD)', 100),
     ('pdd', '维维怡佳永盛专卖店'):   ('维维怡佳永盛专卖店', '维维(PDD)', 110),
     ('pdd', '怡佳永盛食品专营店'):   ('怡佳永盛食品专营店', '怡佳永盛', 120),
+    # 京东自营（供应商视角，店铺维度来自表内「店铺名称」列）
+    ('jd_self', '西麦京东自营旗舰店'):         ('西麦京东自营旗舰店', '西麦(自营)', 130),
+    ('jd_self', '维维豆奶京东自营旗舰店'):     ('维维豆奶京东自营旗舰店', '维维(自营)', 140),
+    ('jd_self', '飞鹤成人奶粉京东自营旗舰店'): ('飞鹤成人奶粉京东自营旗舰店', '飞鹤(自营)', 150),
+    ('jd_self', '西麦SEAMILD冲饮京东自营旗舰店'): ('西麦SEAMILD冲饮', '西麦冲饮(自营)', 160),
+    ('jd_self', '西麦五谷粉粉京东自营旗舰店'): ('西麦五谷粉粉京东自营旗舰店', '西麦五谷(自营)', 170),
+    ('jd_self', '飞鹤爱本京东自营旗舰店'):     ('飞鹤爱本京东自营旗舰店', '飞鹤爱本(自营)', 180),
+    ('jd_self', 'Jim Barry葡萄酒京东自营旗舰店'): ('JimBarry葡萄酒京东自营旗舰店', 'JimBarry(自营)', 190),
+    ('jd_self', '睿思（Ravensburger） 京东自营旗舰店'): ('睿思京东自营旗舰店', '睿思(自营)', 200),
+    ('jd_self', '北纬妈咪京东自营旗舰店'):     ('北纬妈咪京东自营旗舰店', '北纬妈咪(自营)', 210),
+    ('jd_self', '新主良京东自营旗舰店'):       ('新主良京东自营旗舰店', '新主良(自营)', 220),
+    ('jd_self', '1号会员店'):                 ('1号会员店', '1号店(自营)', 230),
+    ('jd_self', '未分配'):                    ('未分配（无店铺）', '未分配(自营)', 240),
 }
 
 # 平台显示名（前端平台切换器用）
-PLATFORMS = {'jd': '京东', 'vip': '唯品会', 'pdd': '拼多多'}
+PLATFORMS = {'jd': '京东', 'vip': '唯品会', 'pdd': '拼多多', 'jd_self': '京东自营'}
+
+# ── 店铺显示/隐藏配置 ────────────────────────────────────────────────────────
+# 独立 JSON 配置文件：scripts/shops_visibility.json
+#   {"hidden": ["jd_self|未分配", ...], "hiddenPlatforms": []}
+#   - hidden：隐藏的店铺（内部 key = 平台|店铺名），不参与聚合、图表与前端展示
+#   - hiddenPlatforms：隐藏整个平台（如临时下线 vip）
+# 环境变量 SHOP_VISIBILITY_FILE 可覆盖配置文件路径
+import json as _json
+VISIBILITY_FILE = Path(os.environ.get(
+    'SHOP_VISIBILITY_FILE',
+    Path(__file__).parent / 'shops_visibility.json'))
+def _load_visibility():
+    try:
+        cfg = _json.loads(VISIBILITY_FILE.read_text(encoding='utf-8'))
+        return set(cfg.get('hidden', [])), set(cfg.get('hiddenPlatforms', []))
+    except FileNotFoundError:
+        return set(), set()
+    except Exception as e:
+        print(f"⚠️  店铺可见性配置解析失败（忽略）: {VISIBILITY_FILE}: {e}")
+        return set(), set()
+HIDDEN_SHOPS, HIDDEN_PLATFORMS = _load_visibility()
+
+# 生效店铺列表 = SHOPS - 隐藏店铺 - 隐藏平台店铺（保持注册顺序）
+SHOPS_VISIBLE = {
+    k: v for k, v in SHOPS.items()
+    if f"{k[0]}|{k[1]}" not in HIDDEN_SHOPS and k[0] not in HIDDEN_PLATFORMS
+}
 
 # ── 数据字段 ──────────────────────────────────────────────────────────────────
 # 参与计算和对比的数值字段
@@ -64,6 +109,16 @@ FIELDS = [
     'productImpressionUsers','addCartUsers','orderAmount',
     'orderCount','orderBuyers','refundAmount',
 ]
+
+# 自营新增字段（仅 jd_self 平台店铺有效）
+SELF_FIELDS = [
+    'gmvOutbound',      # 出库金额（采购价 × 昨日出库件数）
+    'unitsOutbound',    # 出库件数（昨日出库件数）
+    'stockValue',       # 可用库存额（现货库存 × 采购价）
+    'out30dValue',      # 近30日出库额（近30日出库件数 × 采购价）
+]
+# 自营额外字段也参与部分聚合（如平台总和）
+ALL_FIELDS = FIELDS + SELF_FIELDS
 
 # Excel 表头列名（商智导出的列顺序）
 COLUMNS = [

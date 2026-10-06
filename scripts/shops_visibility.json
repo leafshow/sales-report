@@ -1,0 +1,10 @@
+{
+  "// 说明": "店铺显示/隐藏配置。hidden: 隐藏的店铺（key=平台|店铺名，如 jd_self|未分配）；hiddenPlatforms: 隐藏整个平台（jd/vip/pdd/jd_self）。隐藏后不参与聚合、图表与前端展示。",
+  "hidden": [
+    "jd_self|未分配",
+    "jd_self|睿思（Ravensburger） 京东自营旗舰店",
+    "jd_self|北纬妈咪京东自营旗舰店",
+    "jd_self|新主良京东自营旗舰店"
+  ],
+  "hiddenPlatforms": []
+}
