@@ -113,6 +113,25 @@ def handler():
                 "gmv": row[4], "units": row[5], "visitors": row[6],
                 "conversion": row[7], "uvValue": row[8], "refundAmount": row[9], "gmvOutbound": row[10] or 0.0})
 
+        # city_stock（头部SKU主要城市库存，含预警级别）
+        city_stock = {}
+        for row in con.sql("SELECT date,shop,sku,name,city,stock,daily_avg,days_cover,out_yesterday,out_7d,nat_stock,nat_days_cover,price FROM city_stock ORDER BY date,shop,sku,city").fetchall():
+            days=row[7]
+            if days is None:
+                level="unknown"
+            elif days<1:
+                level="critical"
+            elif days<3:
+                level="warn"
+            else:
+                level="ok"
+            city_stock.setdefault(row[0], []).append({
+                "shopRaw": row[1], "shopDisplay": shop_display.get(row[1], row[1]),
+                "sku": row[2], "name": row[3], "city": row[4],
+                "stock": row[5], "dailyAvg": row[6], "daysCover": days, "level": level,
+                "outYesterday": row[8], "out7d": row[9], "natStock": row[10],
+                "natDaysCover": row[11], "price": row[12]})
+
         # movers
         movers = {}
         for row in con.sql("""SELECT date,type,shop,sku,name,previous_gmv,gmv,delta
@@ -158,7 +177,7 @@ def handler():
             "overall": overall, "shopDaily": shop_daily,
             "categories": categories, "topSkus": top_skus,
             "movers": movers, "alerts": alerts,
-            "quality": quality, "charts": charts,
+            "quality": quality, "charts": charts, "cityStock": city_stock,
             "optimization": optimization,
         }
         return _resp(200, result)

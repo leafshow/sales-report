@@ -1,6 +1,6 @@
 # 多平台店铺销售日报
 
-基于京东商智、唯品会、拼多多导出的商品数据，通过 **DuckDB + Vercel Serverless Function（Flask）** 生成交互式销售日报。支持多平台、多店铺整合展示与平台切换。
+基于京东商智（POP/自营）、唯品会、拼多多导出的商品数据，通过 **DuckDB + Vercel Serverless Function（Flask）** 生成交互式销售日报。支持多平台、多店铺整合展示与平台切换。
 
 **线上地址**：https://sales-report-self.vercel.app
 
@@ -13,7 +13,7 @@
 │ index.html   │ ──────────────→│ api/data.py      │─────────────→│ report.duckdb  │
 │   ~51KB      │←──── JSON ─────│ (Flask Function) │←──read_only──│   ~5.3MB       │
 └──────────────┘                └──────────────────┘              └────────────────┘
-      数据源: ~/Desktop/Platform-Date/{JD,VIP}/Import/*.xlsx
+      数据源: ~/Desktop/Platform-Date/{JD,VIP,PDD}/Import + {JD_SELF}/*.xlsx|csv
              └── scripts/build_all_shop_daily.py 构建入库 ──┘
 ```
 
@@ -22,7 +22,7 @@
 | `index.html` | ~51KB | 轻量 HTML，运行时 fetch `/api/data` 加载数据 |
 | `api/data.py` | ~7KB | Flask 入口（`app`），读 DuckDB（read_only）返回 JSON |
 | `api/report.duckdb` | ~5.3MB | 函数打包读取的数据库副本（构建后自动同步） |
-| `api/data/report.duckdb` | ~5.3MB | 构建主输出（10 张表） |
+| `api/data/report.duckdb` | ~5.3MB | 构建主输出（11 张表，含 city_stock 城市库存） |
 
 > ⚠️ Vercel 文件系统只读，duckdb 必须 `connect(path, read_only=True)`；
 > ⚠️ 新版 Python runtime 只支持 Flask/ASGI `app` 入口，不再支持裸 `handler`。
@@ -55,6 +55,15 @@
 - **派生指标**：零售/出库比、库存周转率（近30日出库额÷可用库存额）、库存周转天数。
 - **前端展示**：所有平台基础版式一致（GMV=成交金额）；选择京东自营时，核心 KPI、店铺表现、类目结构、当日 SKU、7日优化研究、GMV 归因各表末尾追加「出库金额」（及 KPI/归因的「出库件数」）列/卡；另有「自营双口径 KPI」「自营库存健康」两个专属 section。
 - **缺失数据源显示 —**：如某店铺只有库存表无经营状况记录（如飞鹤成人），零售列显示 `—`，数据源状态列标注「仅库存」。
+
+### 头部商品城市库存预警
+
+- **数据来源**：供应链库存表中的城市维度列（`{城市}现货库存`、`{城市}昨日出库商品件数` 等，~90 城市），取 7 个主要 RDC：北京 / 上海 / 广州 / 成都 / 武汉 / 沈阳 / 西安。注意城市列只覆盖部分主力仓，城市合计 ≠ 全国库存。
+- **范围**：近7日出库 TOP 20 SKU × 上述 7 城市（`HEAD_CITY_LIMIT` / `MAIN_CITIES`，位于 `build_all_shop_daily.py`）。
+- **落库**：DuckDB 表 `city_stock(date, shop, sku, name, city, stock, daily_avg, days_cover, out_yesterday, out_7d, nat_stock, nat_days_cover, price)`。
+- **预警分级**：`days_cover = 城市库存 ÷ SKU近7日日均出库`；<1 天 → 断货风险（红），1~3 天 → 偏低（黄），≥3 天 → 正常，无出库 → unknown。
+- **前端**：「头部商品城市库存预警」表格（仅京东自营视图可见）：一行一个 SKU，横向展示 7 城市库存/覆盖天数，附采购价、昨出库、近7日出库、全国库存与全国覆盖天数；按最差城市覆盖天数升序排列，风险格着色。
+- **口径注意**：个别日期导出未勾选城市字段时该日数据缺失显示 —；头部 SKU 按全表昨日出库选取，落在无出库店铺分组的行 `days_cover` 为 null（unknown）。
 
 ### 拼多多指标映射
 
@@ -96,10 +105,10 @@ sales-report/
 │       ├── data.py                # Flask Function（app + /api/data 路由）
 │       ├── requirements.txt       # flask + duckdb
 │       ├── report.duckdb          # ★ 函数打包读取的库（构建后自动同步）
-│       └── data/report.duckdb     # 构建主输出
+│       └── data/report.duckdb     # 构建主输出（11 张表，含 city_stock 城市库存）
 ├── scripts/
 │   ├── config.py                  # ⚙️ 配置中心（平台目录/店铺/阈值/窗口）
-│   ├── build_all_shop_daily.py    # 构建脚本（多平台 Excel → DuckDB + HTML）
+│   ├── build_all_shop_daily.py    # 构建脚本（多平台 Excel → DuckDB + HTML；京东自营含城市库存解析）
 │   ├── start-server.sh            # 本地服务器启动
 │   ├── open-report.command        # macOS 双击启动
 │   └── view-report.command        # macOS 后台启动
@@ -119,7 +128,7 @@ sales-report/
 ```bash
 cd ~/Documents/GitHub/sales-report
 
-# 1. 构建（自动读取两个平台目录，自动同步 db 到 api/）
+# 1. 构建（自动读取四个平台目录，自动同步 db 到 api/）
 python3 scripts/build_all_shop_daily.py
 
 # 2. 提交推送（push 即自动触发 Vercel 部署）
@@ -144,6 +153,7 @@ cd templates && python3 server.py
 | 京东 | `~/Desktop/Platform-Date/JD/Import` | `DATA_DIR_JD`（兼容旧 `DATA_DIR`） |
 | 唯品会 | `~/Desktop/Platform-Date/VIP/Import` | `DATA_DIR_VIP` |
 | 拼多多 | `~/Desktop/Platform-Date/PDD/Import` | `DATA_DIR_PDD` |
+| 京东自营 | `~/Desktop/Platform-Date/JD_SELF`（无 Import 子目录） | `DATA_DIR_JD_SELF` |
 
 文件命名：
 
@@ -152,6 +162,7 @@ cd templates && python3 server.py
 | 京东 | `{店铺名}_商品明细_{YYYY-MM-DD}_sku.xlsx` |
 | 唯品会 | `{店铺名}_商品明细_{YYYY-MM-DD}.xlsx` |
 | 拼多多 | `{店铺名}_商品数据_{YYYY-MM-DD}.csv` |
+| 京东自营 | `{供应商}_自营商品明细_{YYYY-MM-DD}.xlsx`（供货出库）+ `{店铺名}_经营状况商品明细_{YYYY-MM-DD}.xlsx`（零售成交） |
 
 > 各平台日期取**并集**，店铺按 `(shop, date)` 独立聚合，某店某日缺文件自动跳过。
 
@@ -200,6 +211,9 @@ cd templates && python3 server.py
 | 10 | 全周期总览 | 每日汇总 |
 | 11 | 数据质量 | 完整性/新鲜度检查；数据不全时顶部黄色警告条列出缺失日期、缺失店铺与空文件（0 行导出） |
 | 12 | 筛选器 | 平台 + 日期 + 店铺三级联动 |
+| 13 | 自营双口径 KPI | 京东自营专属：成交销售额/出库金额/可用库存额/近30日出库额/库存周转率/库存周转天数/出库件数/零售出库比 |
+| 14 | 自营库存健康 | 京东自营专属：按店铺展示库存额与周转状态 |
+| 15 | 头部商品城市库存预警 | 京东自营专属：TOP20 SKU × 7 主要 RDC 城市现货库存横向矩阵，覆盖天数预警分级（<1天断货红 / 1~3天偏低黄），按最差城市排序 |
 
 ---
 
@@ -215,6 +229,8 @@ cd templates && python3 server.py
 | 2026-09-28 | `a968651` | **多平台接入** | 集成唯品会平台，店铺 6 → 8；新增顶部平台切换器（全部/京东/唯品会），联动店铺列表、KPI、图表；唯品会按明细求和、类目记「未分类」、缺失指标（退款等）置 0；同名品牌跨平台独立不合并 |
 | 2026-09-30 | `c7346fb` | **排版优化** | ① 集中度表「最高GMV SKU」列：表头与内容统一左对齐，去除 560px 宽度限制，商品名一行完整展示（截断 + hover tooltip）<br>② 店铺当日表现条形图行：店铺名强制单行 `white-space:nowrap`，列宽由内容自适应（移除固定 `92px`/`145px` 硬编码）<br>③ GMV/转化趋势图表：>1250px 改为同行左右均分双列等宽布局，≤1250px 单列堆叠 |
 | 2026-10-01 | — | **优化历程补全 + 拼多多数据源升级** | **① 优化历程记录**：README 补齐 09-24 ~ 09-28 全部阶段（项目立项 / 首次部署 / 部署修复 / 数据链路修复 / 易用性 / 多平台接入），新增 Commit 列可定位改动<br>**② 拼多多数据源切换**：由「订单 CSV」（07-01~09-29 单文件全周期）改为商智「商品数据」单日快照 CSV（67 列），店铺 8 → 12<br>**③ 补齐缺失指标**：`visitors` / `buyers` / `pv` / `addCartUsers`（映射商品收藏用户数）/ 三级类目；原口径下这些字段恒为 0，导致 GMV 归因、转化趋势、机会品识别对拼多多全部失效<br>**④ 过滤冗余**：35 列丢弃（同行均值 / 推广策略 / 各类环比 / 活动信息）；`近30日` 退款因口径不匹配（日粒度 vs 30 日滚动累计，比值 1043%）不采用，`refundAmount` 保持 0，与唯品会同等<br>**⑤ 连带修复**：日期区间由「平台交集」改为「并集」（旧交集逻辑为 PDD 超长历史设计，会把京东/唯品会 29 天裁到 1 天）；`svg_conversion_chart` 单日数据除零崩溃<br>**⑥ 结果**：拼多多 4 店 × 30 天（09-01~09-30）无缺日，12 个模块全部生效，转化率趋势 / baseline / week / GMV 归因 / 集中度 / 机会品均可正常计算 |
+| 2026-10-02 ~ 10-05 | — | **京东自营双口径接入** | 集成京东自营平台（12 注册 / 8 展示店铺），源文件为商智「经营状况商品明细」（零售成交口径）+「自营商品明细」（供货出库口径），按 (日期， 店铺) 合并为唯一一行；派生指标：零售/出库比、库存周转率、库存周转天数；前端新增「自营双口径 KPI」「自营库存健康」专属 section，各表末尾追加出库金额/件数列；顶部平台切换器扩展至 全部/京东/唯品会/拼多多/京东自营 |
+| 2026-10-08 | `ee9e844` | **头部商品城市库存预警** | **① 数据源**：解析自营商品明细中的城市维度列（~90 城市），取 7 个主要 RDC（北京/上海/广州/成都/武汉/沈阳/西安）<br>**② 落库**：DuckDB 新表 `city_stock`（13 列：城市现货库存、日均出库、覆盖天数、昨出库、近7日出库、全国库存、全国覆盖、采购价），头部 SKU = 近7日出库 TOP 20<br>**③ 预警分级**：覆盖天数 = 城市库存 ÷ 近7日日均出库；<1 天断货风险（红）/ 1~3 天偏低（黄）/ ≥3 天正常<br>**④ 前端**：新增「头部商品城市库存预警」横向矩阵表（SKU 一行 × 城市列，风险格着色，按最差城市覆盖天数升序），仅京东自营视图可见<br>**⑤ 口径注意**：城市仓合计 ≠ 全国库存（主力仓部分覆盖）；个别日期导出未勾选城市字段时该日数据缺失 |
 
 ---
 
@@ -228,3 +244,5 @@ cd templates && python3 server.py
 | 🟡 关注 | 退款偏高 | 退款率 ≥5% 且 ≥¥300（唯品会、拼多多无日粒度退款数据，不触发） |
 | ⚪ SKU | SKU大幅下滑 | 减少 ≥¥500 且降幅 ≥50% |
 | 🔵 机会 | 高流量低转化 | 访客 ≥100 且转化 < 整体 ×75% |
+| 🔴 断货风险 | 城市库存（自营） | 头部 SKU 某主要城市覆盖天数 <1（库存 ÷ 近7日日均出库） |
+| 🟡 偏低 | 城市库存（自营） | 头部 SKU 某主要城市覆盖天数 1~3 天 |
