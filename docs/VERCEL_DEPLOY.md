@@ -27,7 +27,7 @@ git push
 
 | 配置项 | 值 |
 |--------|-----|
-| Root Directory | `db-fetch-report/templates` |
+| Root Directory | `sales-report/templates` |
 | Framework Preset | Other |
 | Build Command | 留空 |
 | Output Directory | 留空 |

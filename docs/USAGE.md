@@ -16,7 +16,7 @@
 
 ### 3. 重新构建报表
 ```bash
-cd db-fetch-report/scripts
+cd sales-report/scripts
 python3 build_all_shop_daily.py
 ```
 
