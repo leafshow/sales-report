@@ -72,7 +72,7 @@ SHOPS = {
 }
 
 # 平台显示名（前端平台切换器用）
-PLATFORMS = {'jd': '京东', 'vip': '唯品会', 'pdd': '拼多多', 'jd_self': '京东自营'}
+PLATFORMS = {'jd': '京东POP', 'vip': '唯品会', 'pdd': '拼多多', 'jd_self': '京东自营'}
 
 # ── 店铺显示/隐藏配置 ────────────────────────────────────────────────────────
 # 独立 JSON 配置文件：scripts/shops_visibility.json
