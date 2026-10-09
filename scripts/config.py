@@ -14,6 +14,7 @@ PLATFORM_DIRS = {
     'pdd': Path(os.environ.get('DATA_DIR_PDD', Path.home() / 'Desktop' / 'Platform-Date' / 'PDD')),
     'jd_self': Path(os.environ.get('DATA_DIR_JD_SELF', Path.home() / 'Desktop' / 'Platform-Date' / 'JD_SELF')),
     'tmall': Path(os.environ.get('DATA_DIR_TMALL', Path.home() / 'Desktop' / 'Platform-Date' / 'TMALL')),
+    'vip_jitx': Path(os.environ.get('DATA_DIR_VIP_JITX', Path.home() / 'Desktop' / 'Platform-Date' / 'VIP_JITX')),
 }
 # 兼容旧变量：DATA_DIR 覆盖京东目录
 if os.environ.get('DATA_DIR', ''):
@@ -71,6 +72,8 @@ MAIN_CITIES = ['北京', '上海', '广州', '成都', '武汉', '沈阳', '西�
 FILE_PATTERN_JD_SELF_TRAFFIC = r'^(.+)_经营状况商品明细_(\d{4}-\d{2}-\d{2})\.xlsx$'
 # 天猫：{店铺名}_商品报表_{日期}.xls（生意参谋商品报表，表头位于第 5 行，含支付金额/支付买家数/商品访客数等 38 列）
 FILE_PATTERN_TMALL = r'^(.+)_商品报表_(\d{4}-\d{2}-\d{2})\.xls$'
+# 唯品会 JITX：{店铺名}JITX销售*销售数据.xlsx（单文件多日累积，含「日期」列，构建时按日拆分；店铺名含 JITX 后缀）
+FILE_PATTERN_VIP_JITX = r'^((?:\S+?)JITX)销售\S*销售数据\.xlsx$'
 
 # ── 店铺列表 ──────────────────────────────────────────────────────────────────
 # 格式：{(平台, 文件名店铺名)} : (显示名, 简称, 排序序号)
@@ -86,6 +89,7 @@ SHOPS = {
     ('jd', '认养一头牛冲饮奶粉旗舰店'): ('认养一头牛冲饮奶粉旗舰店', '认养一头牛(JD)', 65),
     # 唯品会
     ('vip', '维维食品特卖旗舰店'):   ('维维食品特卖旗舰店', '维维(VIP)', 70),
+    ('vip_jitx', '维维JITX'):        ('维维旗舰店', '维维', 75),
     ('vip', '西麦食品特卖旗舰店'):   ('西麦食品特卖旗舰店', '西麦(VIP)', 80),
     # 拼多多
     ('pdd', '飞鹤成人奶粉旗舰店'):   ('飞鹤成人奶粉旗舰店', '飞鹤(PDD)', 90),
@@ -112,7 +116,7 @@ SHOPS = {
 }
 
 # 平台显示名（前端平台切换器用）
-PLATFORMS = {'jd_self': '京东自营', 'jd': '京东POP', 'tmall': '天猫', 'vip': '唯品会', 'pdd': '拼多多'}
+PLATFORMS = {'jd_self': '京东自营', 'jd': '京东POP', 'tmall': '天猫', 'vip': '唯品会', 'vip_jitx': '唯品会JITX', 'pdd': '拼多多'}
 
 # ── 店铺显示/隐藏配置 ────────────────────────────────────────────────────────
 # 独立 JSON 配置文件：scripts/shops_visibility.json

@@ -19,6 +19,7 @@ FILE_RE_JD_SELF = re.compile(config.FILE_PATTERN_JD_SELF)
 FILE_RE_JD_SELF_TRAFFIC = re.compile(config.FILE_PATTERN_JD_SELF_TRAFFIC)
 FILE_RE_JD_SELF_CITY = re.compile(config.FILE_PATTERN_JD_SELF_CITY)
 FILE_RE_TMALL = re.compile(config.FILE_PATTERN_TMALL)
+FILE_RE_VIP_JITX = re.compile(config.FILE_PATTERN_VIP_JITX)
 SHOPS    = config.SHOPS
 SHOP_META     = {f"{k[0]}|{k[1]}": v for k, v in config.SHOPS_VISIBLE.items()}   # 内部唯一 key = 平台|店铺名（仅可见店铺）
 SHOP_PLATFORM = {f"{k[0]}|{k[1]}": k[0] for k in SHOPS}
@@ -456,6 +457,9 @@ def build():
                 file_list.extend((f, plat) for f in sorted(pdir.glob("*.csv")) if FILE_RE_PDD.match(f.name))
             elif plat == "tmall":
                 file_list.extend((f, plat) for f in sorted(pdir.glob("*.xls")) if FILE_RE_TMALL.match(f.name))
+            elif plat == "vip_jitx":
+                # 唯品会 JITX：单文件多日累积报表（{店铺}JITX销售*销售数据.xlsx）
+                file_list.extend((f, plat) for f in sorted(pdir.glob("*.xlsx")) if FILE_RE_VIP_JITX.match(f.name))
             elif plat == "jd_self":
                 # 排除 Excel 锁文件 ~$xxx.xlsx；库存表 + 流量表双源
                 for f in sorted(pdir.glob("*.xlsx")):
@@ -523,6 +527,22 @@ def build():
             for sk in skus_t:
                 sk.update({"date":date,"shopRaw":key,"shopDisplay":shop_display(key)})
                 sku.setdefault(date,[]).append(sk)
+            continue
+        if plat == "vip_jitx":
+            m=FILE_RE_VIP_JITX.match(f.name)
+            if not m: continue
+            raw_shop=m.group(1)
+            key=f"{plat}|{raw_shop}"
+            if key not in SHOP_META:
+                q["unexpectedShops"].append(f"{plat}:{raw_shop}"); continue
+            df=pd.read_excel(f)
+            df["日期"]=df["日期"].astype(str).str.slice(0,10)
+            for date,g in df.groupby("日期"):
+                if len(g)==0:
+                    q.setdefault("emptyFiles", []).append({"shop": raw_shop, "date": date, "file": f.name}); continue
+                q["parsedFiles"]+=1; pairs.add((key,date))
+                totals={c: g[c].sum() for c in ("销售额","销售量","客户数","商详UV")}
+                shop_rows[key].append(vip_total_row(date,key,totals,len(g),f.name)); sku.setdefault(date,[]).extend(vip_sku_rows(date,key,g))
             continue
         m=FILE_RE.match(f.name)
         if not m: continue
