@@ -17,6 +17,7 @@ FILE_RE  = re.compile(config.FILE_PATTERN)
 FILE_RE_PDD = re.compile(config.FILE_PATTERN_PDD)
 FILE_RE_JD_SELF = re.compile(config.FILE_PATTERN_JD_SELF)
 FILE_RE_JD_SELF_TRAFFIC = re.compile(config.FILE_PATTERN_JD_SELF_TRAFFIC)
+FILE_RE_TMALL = re.compile(config.FILE_PATTERN_TMALL)
 SHOPS    = config.SHOPS
 SHOP_META     = {f"{k[0]}|{k[1]}": v for k, v in config.SHOPS_VISIBLE.items()}   # 内部唯一 key = 平台|店铺名（仅可见店铺）
 SHOP_PLATFORM = {f"{k[0]}|{k[1]}": k[0] for k in SHOPS}
@@ -106,6 +107,42 @@ def pdd_parse_file(path, date):
                      "addCartUsers": int(pd.to_numeric(s["商品收藏用户数"], errors="coerce") or 0),
                      "refundAmount": 0.0, "conversion": r(sbuy, svis),
                      "uvValue": r(sgmv, svis)})
+    return row, skus
+
+def tmall_parse_file(path, date):
+    """解析天猫生意参谋商品报表 .xls（表头第 5 行，明细行），返回 (店铺行, SKU 明细)
+
+    口径映射：支付金额→gmv、支付件数→units、支付买家数→buyers、下单买家数→orders（单量近似）、
+    商品访客数→visitors、商品浏览量→pv、商品加购人数→addCartUsers、成功退款金额→refundAmount。
+    """
+    df = pd.read_excel(path, header=4)
+    if len(df) == 0:
+        return None, []
+    num = lambda c: pd.to_numeric(df[c], errors="coerce").fillna(0.0)
+    cnt = lambda c: int(num(c).sum())
+    gmv = float(num("支付金额").sum())
+    x = {"date": date, "skuCount": int(df["商品ID"].nunique()), "sourceFile": path.name,
+         "gmv": gmv, "units": cnt("支付件数"), "orders": cnt("支付买家数"),
+         "buyers": cnt("支付买家数"), "visitors": cnt("商品访客数"), "pv": cnt("商品浏览量"),
+         "searchImpressions": 0, "searchClicks": 0,
+         "productImpressions": 0, "productImpressionUsers": 0,
+         "addCartUsers": cnt("商品加购人数"),
+         "orderAmount": float(num("下单金额").sum()), "orderCount": cnt("下单买家数"),
+         "orderBuyers": cnt("下单买家数"), "refundAmount": float(num("成功退款金额").sum())}
+    row = calc(x)
+    skus = []
+    for _, s in df.iterrows():
+        sgmv = float(pd.to_numeric(s["支付金额"], errors="coerce") or 0)
+        svis = int(pd.to_numeric(s["商品访客数"], errors="coerce") or 0)
+        sbuy = int(pd.to_numeric(s["支付买家数"], errors="coerce") or 0)
+        skus.append({"_date": date, "sku": str(s["商品ID"]), "name": t(s["商品名称"]),
+                     "category1": "未分类", "category2": "未分类", "category3": "未分类",
+                     "gmv": sgmv, "units": int(pd.to_numeric(s["支付件数"], errors="coerce") or 0),
+                     "orders": sbuy, "buyers": sbuy, "visitors": svis,
+                     "searchImpressions": 0, "searchClicks": 0,
+                     "addCartUsers": int(pd.to_numeric(s["商品加购人数"], errors="coerce") or 0),
+                     "refundAmount": float(pd.to_numeric(s["成功退款金额"], errors="coerce") or 0),
+                     "conversion": r(sbuy, svis), "uvValue": r(sgmv, svis)})
     return row, skus
 
 SELF_FIELDS   = config.SELF_FIELDS
@@ -358,6 +395,8 @@ def build():
         if pdir.exists():
             if plat == "pdd":
                 file_list.extend((f, plat) for f in sorted(pdir.glob("*.csv")) if FILE_RE_PDD.match(f.name))
+            elif plat == "tmall":
+                file_list.extend((f, plat) for f in sorted(pdir.glob("*.xls")) if FILE_RE_TMALL.match(f.name))
             elif plat == "jd_self":
                 # 排除 Excel 锁文件 ~$xxx.xlsx；库存表 + 流量表双源
                 for f in sorted(pdir.glob("*.xlsx")):
@@ -400,6 +439,25 @@ def build():
             row_p["shopRaw"]=key; row_p["shopDisplay"]=shop_display(key)
             shop_rows[key].append(row_p)
             for sk in skus_p:
+                sk.update({"date":date,"shopRaw":key,"shopDisplay":shop_display(key)})
+                sku.setdefault(date,[]).append(sk)
+            continue
+        if plat == "tmall":
+            m=FILE_RE_TMALL.match(f.name)
+            if not m: continue
+            raw_shop=m.group(1)
+            key=f"{plat}|{raw_shop}"
+            if key not in SHOP_META:
+                q["unexpectedShops"].append(f"tmall:{raw_shop}"); continue
+            date=m.group(2)
+            row_t, skus_t = tmall_parse_file(f, date)
+            if not row_t:
+                q.setdefault("emptyFiles", []).append({"shop": raw_shop, "date": date, "file": f.name}); continue
+            q["parsedFiles"]+=1
+            pairs.add((key,date))
+            row_t["shopRaw"]=key; row_t["shopDisplay"]=shop_display(key)
+            shop_rows[key].append(row_t)
+            for sk in skus_t:
                 sk.update({"date":date,"shopRaw":key,"shopDisplay":shop_display(key)})
                 sku.setdefault(date,[]).append(sk)
             continue
@@ -715,7 +773,14 @@ def build():
             "optimization":optimization}
 
 if __name__=="__main__":
+    import math
+    def _denan(o):
+        if isinstance(o,dict): return {k:_denan(v) for k,v in o.items()}
+        if isinstance(o,list): return [_denan(v) for v in o]
+        if isinstance(o,float) and not math.isfinite(o): return None
+        return o
     data=build()
+    data=_denan(data)
     slim_keys=["gmv","units","orders","buyers","visitors","conversion","aov","uvValue","addCartUsers","refundRate"]
     all_rows=list(data["overall"])
     for rows in data["shopDaily"].values(): all_rows.extend(rows)
@@ -793,7 +858,7 @@ if __name__=="__main__":
                 visitors = int(r.get('visitors',0)) if r.get('visitors') is not None else 0
                 gmv_val = r.get('gmv',0) if r.get('gmv') is not None else 0
                 refund = r.get('refundAmount',0) if r.get('refundAmount') is not None else 0
-                con.execute(f"INSERT INTO categories VALUES ('{date}', '{p_esc}', '{l1_esc}', '{l2_esc}', '{l3_esc}', {gmv_val}, {int(r.get('units',0))}, {int(r.get('orders',0))}, {int(r.get('skuCount',0))}, {visitors}, {refund}, {r.get('gmvOutbound',0)})")
+                con.execute(f"INSERT INTO categories VALUES ('{date}', '{p_esc}', '{l1_esc}', '{l2_esc}', '{l3_esc}', {sqlnum(gmv_val) if gmv_val else 0}, {int(r.get('units',0) or 0)}, {int(r.get('orders',0) or 0)}, {int(r.get('skuCount',0) or 0)}, {visitors}, {refund if refund is not None else 0}, {r.get('gmvOutbound',0) or 0})")
         # city_stock
         for date, shops_cs in data.get("cityStock", {}).items():
             for shop, cs in shops_cs.items():
@@ -809,22 +874,21 @@ if __name__=="__main__":
                 name_esc = r["name"].replace(chr(39), chr(92)+chr(39))
                 conv = sqlnum(r.get('conversion'))
                 uvv = sqlnum(r.get('uvValue'))
-                con.execute(f"INSERT INTO top_skus VALUES ('{date}', '{r['shopRaw']}', '{r['sku']}', '{name_esc}', {r['gmv']}, {int(r['units'])}, {int(r['visitors'])}, {conv}, {uvv}, {r['refundAmount']}, {r.get('gmvOutbound',0)})")
+                con.execute(f"INSERT INTO top_skus VALUES ('{date}', '{r['shopRaw']}', '{r['sku']}', '{name_esc}', {r['gmv'] if r['gmv'] is not None else 0}, {int(r['units'] or 0)}, {int(r['visitors'] or 0)}, {conv}, {uvv}, {r['refundAmount'] if r.get('refundAmount') is not None else 0}, {r.get('gmvOutbound',0) or 0})")
         # movers
         for date, mv in data["movers"].items():
             for r in mv.get("risers", []):
                 name_esc = r["name"].replace(chr(39), chr(92)+chr(39))
-                con.execute(f"INSERT INTO movers VALUES ('{date}', 'riser', '{r['shopRaw']}', '{r['sku']}', '{name_esc}', {r['previousGmv']}, {r['gmv']}, {r['delta']})")
+                con.execute(f"INSERT INTO movers VALUES ('{date}', 'riser', '{r['shopRaw']}', '{r['sku']}', '{name_esc}', {sqlnum(r.get('previousGmv'))}, {sqlnum(r.get('gmv'))}, {sqlnum(r.get('delta'))})")
             for r in mv.get("fallers", []):
                 name_esc = r["name"].replace(chr(39), chr(92)+chr(39))
-                con.execute(f"INSERT INTO movers VALUES ('{date}', 'faller', '{r['shopRaw']}', '{r['sku']}', '{name_esc}', {r['previousGmv']}, {r['gmv']}, {r['delta']})")
+                con.execute(f"INSERT INTO movers VALUES ('{date}', 'faller', '{r['shopRaw']}', '{r['sku']}', '{name_esc}', {sqlnum(r.get('previousGmv'))}, {sqlnum(r.get('gmv'))}, {sqlnum(r.get('delta'))})")
         # alerts
         for date, aa in data["alerts"].items():
             for a in aa:
                 detail_esc = a["detail"].replace(chr(39), chr(92)+chr(39))
                 scope_esc = a["scope"].replace(chr(39), chr(92)+chr(39))
-                change_v = a.get("change")
-                con.execute(f"INSERT INTO alerts VALUES ('{date}', '{a['level']}', '{scope_esc}', '{a['type']}', '{detail_esc}', {a['current']}, {a['previous']}, {change_v})")
+                con.execute(f"INSERT INTO alerts VALUES ('{date}', '{a['level']}', '{scope_esc}', '{a['type']}', '{detail_esc}', {sqlnum(a.get('current'))}, {sqlnum(a.get('previous'))}, {sqlnum(a.get('change'))})")
         # optimization
         opt_flat = {}
         def _flatten(d, p=""):

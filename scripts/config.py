@@ -13,6 +13,7 @@ PLATFORM_DIRS = {
     'vip': Path(os.environ.get('DATA_DIR_VIP', Path.home() / 'Desktop' / 'Platform-Date' / 'VIP')),
     'pdd': Path(os.environ.get('DATA_DIR_PDD', Path.home() / 'Desktop' / 'Platform-Date' / 'PDD')),
     'jd_self': Path(os.environ.get('DATA_DIR_JD_SELF', Path.home() / 'Desktop' / 'Platform-Date' / 'JD_SELF')),
+    'tmall': Path(os.environ.get('DATA_DIR_TMALL', Path.home() / 'Desktop' / 'Platform-Date' / 'TMALL')),
 }
 # 兼容旧变量：DATA_DIR 覆盖京东目录
 if os.environ.get('DATA_DIR', ''):
@@ -36,6 +37,8 @@ FILE_PATTERN_PDD = r'^(.+)_商品数据_(\d{4}-\d{2}-\d{2})\.csv$'
 FILE_PATTERN_JD_SELF = r'^(.+)_自营商品明细_(\d{4}-\d{2}-\d{2})\.xlsx$'
 # 京东自营流量表（经营状况）：{供应商名}_经营状况商品明细_{日期}.xlsx（商智标准字段）
 FILE_PATTERN_JD_SELF_TRAFFIC = r'^(.+)_经营状况商品明细_(\d{4}-\d{2}-\d{2})\.xlsx$'
+# 天猫：{店铺名}_商品报表_{日期}.xls（生意参谋商品报表，表头位于第 5 行，含支付金额/支付买家数/商品访客数等 38 列）
+FILE_PATTERN_TMALL = r'^(.+)_商品报表_(\d{4}-\d{2}-\d{2})\.xls$'
 
 # ── 店铺列表 ──────────────────────────────────────────────────────────────────
 # 格式：{(平台, 文件名店铺名)} : (显示名, 简称, 排序序号)
@@ -56,6 +59,9 @@ SHOPS = {
     ('pdd', '完达山怡佳永盛专卖店'): ('完达山怡佳永盛专卖店', '完达山(PDD)', 100),
     ('pdd', '维维怡佳永盛专卖店'):   ('维维怡佳永盛专卖店', '维维(PDD)', 110),
     ('pdd', '怡佳永盛食品专营店'):   ('怡佳永盛食品专营店', '怡佳永盛', 120),
+    # 天猫（生意参谋商品报表）
+    ('tmall', '完达山怡佳永盛专卖店'): ('完达山怡佳永盛专卖店(天猫)', '完达山(TMALL)', 125),
+    ('tmall', '怡通永盛食品专营店'):   ('怡通永盛食品专营店(天猫)', '怡通永盛(TMALL)', 126),
     # 京东自营（供应商视角，店铺维度来自表内「店铺名称」列）
     ('jd_self', '西麦京东自营旗舰店'):         ('西麦京东自营旗舰店', '西麦(自营)', 130),
     ('jd_self', '维维豆奶京东自营旗舰店'):     ('维维豆奶京东自营旗舰店', '维维(自营)', 140),
@@ -72,7 +78,7 @@ SHOPS = {
 }
 
 # 平台显示名（前端平台切换器用）
-PLATFORMS = {'jd': '京东POP', 'vip': '唯品会', 'pdd': '拼多多', 'jd_self': '京东自营'}
+PLATFORMS = {'jd': '京东POP', 'vip': '唯品会', 'pdd': '拼多多', 'jd_self': '京东自营', 'tmall': '天猫'}
 
 # ── 店铺显示/隐藏配置 ────────────────────────────────────────────────────────
 # 独立 JSON 配置文件：scripts/shops_visibility.json
