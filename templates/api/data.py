@@ -88,10 +88,10 @@ def handler():
                    "refundAmount": row[11], "refundRate": row[12]}
             rec["baseline"] = json.loads(row[13]) if row[13] else None
             rec["week"] = json.loads(row[14]) if row[14] else None
-            rec["gmvOutbound"] = row[15] or 0.0
-            rec["unitsOutbound"] = row[16] or 0
-            rec["stockValue"] = row[17] or 0.0
-            rec["out30dValue"] = row[18] or 0.0
+            rec["gmvOutbound"] = row[15]
+            rec["unitsOutbound"] = row[16]
+            rec["stockValue"] = row[17]
+            rec["out30dValue"] = row[18]
             shop_daily.setdefault(row[1], []).append(rec)
 
         # categories
@@ -102,7 +102,7 @@ def handler():
                 "path": row[1], "shopRaw": row[1].split("/")[0], "l1": row[2], "l2": row[3], "l3": row[4],
                 "category1": row[2], "category2": row[3], "category3": row[4],
                 "gmv": row[5], "units": row[6], "orders": row[7],
-                "skuCount": row[8], "visitors": row[9], "refundAmount": row[10], "gmvOutbound": row[11] or 0.0})
+                "skuCount": row[8], "visitors": row[9], "refundAmount": row[10], "gmvOutbound": row[11]})
 
         # top_skus
         top_skus = {}
@@ -111,7 +111,7 @@ def handler():
             top_skus.setdefault(row[0], []).append({
                 "shopRaw": row[1], "shopDisplay": shop_display.get(row[1], row[1]), "sku": row[2], "name": row[3],
                 "gmv": row[4], "units": row[5], "visitors": row[6],
-                "conversion": row[7], "uvValue": row[8], "refundAmount": row[9], "gmvOutbound": row[10] or 0.0})
+                "conversion": row[7], "uvValue": row[8], "refundAmount": row[9], "gmvOutbound": row[10]})
 
         # city_stock（头部SKU主要城市库存，含预警级别）
         city_stock = {}
@@ -177,7 +177,7 @@ def handler():
             "overall": overall, "shopDaily": shop_daily,
             "categories": categories, "topSkus": top_skus,
             "movers": movers, "alerts": alerts,
-            "quality": quality, "charts": charts, "cityStock": city_stock,
+            "quality": quality, "charts": charts, "cityStock": city_stock, "moduleFilters": json.loads(meta_rows.get("moduleFilters", "{}")) if isinstance(meta_rows.get("moduleFilters", "{}"), str) else (meta_rows.get("moduleFilters") or {}),
             "optimization": optimization,
         }
         return _resp(200, result)

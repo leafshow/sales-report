@@ -73,8 +73,8 @@ class Handler(SimpleHTTPRequestHandler):
                    "conversion": row[8], "aov": row[9], "uvValue": row[10],
                    "refundAmount": row[11], "refundRate": row[12],
                    "baseline": parse_json(row[13]), "week": parse_json(row[14]),
-                   "gmvOutbound": row[15] or 0.0, "unitsOutbound": row[16] or 0,
-                   "stockValue": row[17] or 0.0, "out30dValue": row[18] or 0.0}
+                   "gmvOutbound": row[15], "unitsOutbound": row[16],
+                   "stockValue": row[17], "out30dValue": row[18]}
             shop_daily.setdefault(row[1], []).append(rec)
 
         categories = {}
@@ -83,7 +83,7 @@ class Handler(SimpleHTTPRequestHandler):
                 "path": row[1], "shopRaw": row[1].split("/")[0], "l1": row[2], "l2": row[3], "l3": row[4],
                 "category1": row[2], "category2": row[3], "category3": row[4],
                 "gmv": row[5], "units": row[6], "orders": row[7],
-                "skuCount": row[8], "visitors": row[9], "refundAmount": row[10], "gmvOutbound": row[11] or 0.0,
+                "skuCount": row[8], "visitors": row[9], "refundAmount": row[10], "gmvOutbound": row[11],
             })
 
         top_skus = {}
@@ -91,7 +91,7 @@ class Handler(SimpleHTTPRequestHandler):
             top_skus.setdefault(row[0], []).append({
                 "shopRaw": row[1], "shopDisplay": shop_display.get(row[1], row[1]), "sku": row[2], "name": row[3],
                 "gmv": row[4], "units": row[5], "visitors": row[6],
-                "conversion": row[7], "uvValue": row[8], "refundAmount": row[9], "gmvOutbound": row[10] or 0.0,
+                "conversion": row[7], "uvValue": row[8], "refundAmount": row[9], "gmvOutbound": row[10],
             })
 
         city_stock = {}
@@ -150,7 +150,7 @@ class Handler(SimpleHTTPRequestHandler):
             "overall": overall, "shopDaily": shop_daily,
             "categories": categories, "topSkus": top_skus,
             "movers": movers, "alerts": alerts,
-            "quality": quality, "charts": charts, "cityStock": city_stock,
+            "quality": quality, "charts": charts, "cityStock": city_stock, "moduleFilters": json.loads(meta.get("moduleFilters", "{}")),
             "optimization": opt,
         }
 
