@@ -131,17 +131,22 @@ def tmall_parse_file(path, date):
          "orderBuyers": cnt("下单买家数"), "refundAmount": float(num("成功退款金额").sum())}
     row = calc(x)
     skus = []
+    num_s = lambda c: pd.to_numeric(s[c], errors="coerce")
     for _, s in df.iterrows():
-        sgmv = float(pd.to_numeric(s["支付金额"], errors="coerce") or 0)
-        svis = int(pd.to_numeric(s["商品访客数"], errors="coerce") or 0)
-        sbuy = int(pd.to_numeric(s["支付买家数"], errors="coerce") or 0)
+        sgmv = num_s("支付金额")
+        sgmv = 0.0 if pd.isna(sgmv) else float(sgmv)
+        v = num_s("商品访客数"); svis = 0 if pd.isna(v) else int(v)
+        v = num_s("支付买家数"); sbuy = 0 if pd.isna(v) else int(v)
+        v = num_s("支付件数"); units = 0 if pd.isna(v) else int(v)
+        v = num_s("商品加购人数"); cart = 0 if pd.isna(v) else int(v)
+        v = num_s("成功退款金额"); refund = 0.0 if pd.isna(v) else float(v)
         skus.append({"_date": date, "sku": str(s["商品ID"]), "name": t(s["商品名称"]),
                      "category1": "未分类", "category2": "未分类", "category3": "未分类",
-                     "gmv": sgmv, "units": int(pd.to_numeric(s["支付件数"], errors="coerce") or 0),
+                     "gmv": sgmv, "units": units,
                      "orders": sbuy, "buyers": sbuy, "visitors": svis,
                      "searchImpressions": 0, "searchClicks": 0,
-                     "addCartUsers": int(pd.to_numeric(s["商品加购人数"], errors="coerce") or 0),
-                     "refundAmount": float(pd.to_numeric(s["成功退款金额"], errors="coerce") or 0),
+                     "addCartUsers": cart,
+                     "refundAmount": refund,
                      "conversion": r(sbuy, svis), "uvValue": r(sgmv, svis)})
     return row, skus
 
