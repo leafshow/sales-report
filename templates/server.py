@@ -74,7 +74,7 @@ class Handler(SimpleHTTPRequestHandler):
                    "refundAmount": row[11], "refundRate": row[12],
                    "baseline": parse_json(row[13]), "week": parse_json(row[14]),
                    "gmvOutbound": row[15], "unitsOutbound": row[16],
-                   "stockValue": row[17], "out30dValue": row[18]}
+                   "stockValue": row[17], "out30dValue": row[18], "outMtdValue": row[19]}
             shop_daily.setdefault(row[1], []).append(rec)
 
         categories = {}
@@ -150,7 +150,7 @@ class Handler(SimpleHTTPRequestHandler):
             "overall": overall, "shopDaily": shop_daily,
             "categories": categories, "topSkus": top_skus,
             "movers": movers, "alerts": alerts,
-            "quality": quality, "charts": charts, "cityStock": city_stock, "moduleFilters": json.loads(meta.get("moduleFilters", "{}")),
+            "quality": quality, "charts": charts, "cityStock": city_stock, "moduleFilters": json.loads(meta.get("moduleFilters", "{}")), "targets": json.loads(meta.get("targets", "{}")),
             "optimization": opt,
         }
 

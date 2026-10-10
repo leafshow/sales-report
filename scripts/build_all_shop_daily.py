@@ -261,29 +261,40 @@ def jdself_inventory_metrics(path, date):
     # 列名兼容：新导出（10 月起）省略「全国」前缀（现货库存/昨日出库商品件数/近30日出库商品件数）
     df = pd.read_excel(path, nrows=0)
     ALIAS = {"全国现货库存": "现货库存", "全国昨日出库商品件数": "昨日出库商品件数",
-             "全国近30日出库商品件数": "近30日出库商品件数"}
+             "全国近30日出库商品件数": "近30日出库商品件数", "全国月至今出库商品件数": "月至今出库商品件数"}
     colmap = {}
     for full, short in ALIAS.items():
         if full not in df.columns and short in df.columns:
             colmap[full] = short
     if colmap:
         base = ["SKU", "商品名称", "店铺名称", "一级类目", "二级类目", "三级类目", "全国采购价"]
-        df = pd.read_excel(path, usecols=base + list(colmap.values()))
+        use = base + list(colmap.values()) + (["RDC"] if "RDC" in df.columns else [])
+        df = pd.read_excel(path, usecols=use)
         df = df.rename(columns={v: k for k, v in colmap.items()})
     else:
         df = pd.read_excel(path, usecols=["SKU", "商品名称", "店铺名称", "一级类目", "二级类目",
                                            "三级类目", "全国采购价", "全国昨日出库商品件数",
-                                           "全国现货库存", "全国近30日出库商品件数"])
+                                           "全国现货库存", "全国近30日出库商品件数",
+                                           "全国月至今出库商品件数"] +
+                                   (["RDC"] if "RDC" in df.columns else []))
     if len(df) == 0:
         return {}
+    # 纵版新格式：每 SKU 一行 RDC=全国（全国合计）+ N 行分仓明细，全国=分仓合计，直接求和会翻倍。
+    # 存在 RDC=全国 行时仅保留全国行；旧横版（无 RDC 列）每 SKU 一行，不受影响。
+    if "RDC" in df.columns:
+        nat = df[df["RDC"].astype(str).str.strip() == "全国"]
+        if len(nat) > 0:
+            df = nat
     price = pd.to_numeric(df["全国采购价"], errors="coerce").fillna(0.0)
     out_d = pd.to_numeric(df["全国昨日出库商品件数"], errors="coerce").fillna(0.0)
     stock = pd.to_numeric(df["全国现货库存"], errors="coerce").fillna(0.0)
     out30 = pd.to_numeric(df["全国近30日出库商品件数"], errors="coerce").fillna(0.0)
+    out_m = pd.to_numeric(df["全国月至今出库商品件数"], errors="coerce").fillna(0.0)
     df["_gmvOut"] = price * out_d
     df["_unitsOut"] = out_d
     df["_stockVal"] = price * stock
     df["_out30Val"] = price * out30
+    df["_outMtdVal"] = price * out_m
     df["_shop"] = df["店铺名称"].fillna("未分配").astype(str).str.strip()
     result = {}
     for shop, g in df.groupby("_shop"):
@@ -295,7 +306,7 @@ def jdself_inventory_metrics(path, date):
                 for _, s in g.iterrows()]
         result[shop] = {"gmvOutbound": float(g["_gmvOut"].sum()), "unitsOutbound": int(g["_unitsOut"].sum()),
                         "stockValue": float(g["_stockVal"].sum()), "out30dValue": float(g["_out30Val"].sum()),
-                        "skus": skus}
+                        "outMtdValue": float(g["_outMtdVal"].sum()), "skus": skus}
     return result
 
 def jdself_traffic_metrics(path, date):
@@ -459,7 +470,8 @@ def build():
                 file_list.extend((f, plat) for f in sorted(pdir.glob("*.xls")) if FILE_RE_TMALL.match(f.name))
             elif plat == "vip_jitx":
                 # 唯品会 JITX：单文件多日累积报表（{店铺}JITX销售*销售数据.xlsx）
-                file_list.extend((f, plat) for f in sorted(pdir.glob("*.xlsx")) if FILE_RE_VIP_JITX.match(f.name))
+                file_list.extend((f, plat) for f in sorted(pdir.glob("*.xlsx"))
+                                 if FILE_RE_VIP_JITX.match(f.name) and not f.name.startswith("~$"))
             elif plat == "jd_self":
                 # 排除 Excel 锁文件 ~$xxx.xlsx；库存表 + 流量表双源
                 for f in sorted(pdir.glob("*.xlsx")):
@@ -529,20 +541,19 @@ def build():
                 sku.setdefault(date,[]).append(sk)
             continue
         if plat == "vip_jitx":
-            m=FILE_RE_VIP_JITX.match(f.name)
-            if not m: continue
-            raw_shop=m.group(1)
-            key=f"{plat}|{raw_shop}"
-            if key not in SHOP_META:
-                q["unexpectedShops"].append(f"{plat}:{raw_shop}"); continue
+            # 单文件多日累积报表，按「品牌名称」拆分为多店铺（维维JITX / 飞鹤JITX），再按「日期」拆分为逐日数据
+            if not FILE_RE_VIP_JITX.match(f.name): continue
             df=pd.read_excel(f)
             df["日期"]=df["日期"].astype(str).str.slice(0,10)
-            for date,g in df.groupby("日期"):
-                if len(g)==0:
-                    q.setdefault("emptyFiles", []).append({"shop": raw_shop, "date": date, "file": f.name}); continue
-                q["parsedFiles"]+=1; pairs.add((key,date))
-                totals={c: g[c].sum() for c in ("销售额","销售量","客户数","商详UV")}
-                shop_rows[key].append(vip_total_row(date,key,totals,len(g),f.name)); sku.setdefault(date,[]).extend(vip_sku_rows(date,key,g))
+            for brand, bg in df.groupby(df["品牌名称"].fillna("未知").astype(str).str.strip()):
+                key=f"{plat}|{brand}JITX"
+                if key not in SHOP_META:
+                    q["unexpectedShops"].append(f"{plat}:{brand}"); continue
+                for date,g in bg.groupby("日期"):
+                    if len(g)==0: continue
+                    q["parsedFiles"]+=1; pairs.add((key,date))
+                    totals={c: g[c].sum() for c in ("销售额","销售量","客户数","商详UV")}
+                    shop_rows[key].append(vip_total_row(date,key,totals,len(g),f.name)); sku.setdefault(date,[]).extend(vip_sku_rows(date,key,g))
             continue
         m=FILE_RE.match(f.name)
         if not m: continue
@@ -614,6 +625,7 @@ def build():
                  "unitsOutbound": int(i.get("unitsOutbound", 0)),
                  "stockValue": float(i.get("stockValue", 0.0)),
                  "out30dValue": float(i.get("out30dValue", 0.0)),
+                 "outMtdValue": float(i.get("outMtdValue", 0.0)),
                  # 框架其他字段补 0
                  "searchImpressions": 0, "searchClicks": 0,
                  "productImpressions": 0, "productImpressionUsers": 0,
@@ -866,7 +878,8 @@ def build():
             "shops":[{"raw":s,"display":shop_display(s),"brand":SHOP_META[s][1],"platform":shop_platform(s)} for s in shops],"platforms":PLATFORMS,"dates":dates,"overall":overall,
             "shopDaily":shop_rows,"categories":cats,"topSkus":tops,"movers":movers,"alerts":alerts,"quality":q,"charts":charts,"cityStock":city_stock,
             "optimization":optimization,
-            "moduleFilters":config.MODULE_SHOPS_FILTER}
+            "moduleFilters":config.MODULE_SHOPS_FILTER,
+            "targets":{f"{k[0]}|{k[1]}":v for k,v in config.SHOP_TARGETS.items()}}
 
 if __name__=="__main__":
     import math
@@ -901,7 +914,7 @@ if __name__=="__main__":
         con.execute("CREATE TABLE quality (key VARCHAR PRIMARY KEY, value VARCHAR)")
         con.execute("CREATE TABLE charts (schema_key VARCHAR, chart_type VARCHAR, svg_text VARCHAR, PRIMARY KEY(schema_key, chart_type))")
         con.execute("CREATE TABLE overall (date VARCHAR PRIMARY KEY, shop_count BIGINT, sku_count BIGINT, gmv DOUBLE, units BIGINT, orders BIGINT, buyers BIGINT, visitors BIGINT, conversion DOUBLE, aov DOUBLE, uv_value DOUBLE, add_cart_users BIGINT, refund_amount DOUBLE, refund_rate DOUBLE, baseline VARCHAR, week VARCHAR)")
-        con.execute("CREATE TABLE shop_daily (date VARCHAR, shop VARCHAR, sku_count BIGINT, gmv DOUBLE, units BIGINT, orders BIGINT, buyers BIGINT, visitors BIGINT, conversion DOUBLE, aov DOUBLE, uv_value DOUBLE, refund_amount DOUBLE, refund_rate DOUBLE, baseline VARCHAR, week VARCHAR, gmv_outbound DOUBLE, units_outbound BIGINT, stock_value DOUBLE, out30d_value DOUBLE, PRIMARY KEY(date, shop))")
+        con.execute("CREATE TABLE shop_daily (date VARCHAR, shop VARCHAR, sku_count BIGINT, gmv DOUBLE, units BIGINT, orders BIGINT, buyers BIGINT, visitors BIGINT, conversion DOUBLE, aov DOUBLE, uv_value DOUBLE, refund_amount DOUBLE, refund_rate DOUBLE, baseline VARCHAR, week VARCHAR, gmv_outbound DOUBLE, units_outbound BIGINT, stock_value DOUBLE, out30d_value DOUBLE, out_mtd_value DOUBLE, PRIMARY KEY(date, shop))")
         con.execute("CREATE TABLE categories (date VARCHAR, path VARCHAR, l1 VARCHAR, l2 VARCHAR, l3 VARCHAR, gmv DOUBLE, units BIGINT, orders BIGINT, sku_count BIGINT, visitors BIGINT, refund_amount DOUBLE, gmv_outbound DOUBLE)")
         con.execute("CREATE TABLE city_stock (date VARCHAR, shop VARCHAR, sku VARCHAR, name VARCHAR, city VARCHAR, stock DOUBLE, daily_avg DOUBLE, days_cover DOUBLE, out_yesterday DOUBLE, out_7d DOUBLE, nat_stock DOUBLE, nat_days_cover DOUBLE, price DOUBLE)")
         con.execute("CREATE TABLE top_skus (date VARCHAR, shop VARCHAR, sku VARCHAR, name VARCHAR, gmv DOUBLE, units BIGINT, visitors BIGINT, conversion DOUBLE, uv_value DOUBLE, refund_amount DOUBLE, gmv_outbound DOUBLE)")
@@ -915,6 +928,7 @@ if __name__=="__main__":
         con.execute(f"INSERT INTO meta VALUES ('platforms', '{json.dumps(data['platforms'], ensure_ascii=False)}')")
         con.execute(f"INSERT INTO meta VALUES ('dates', '{json.dumps(data['dates'], ensure_ascii=False).replace(chr(39), chr(92)+chr(39))}')")
         con.execute(f"INSERT INTO meta VALUES ('moduleFilters', '{json.dumps(data.get('moduleFilters', {}), ensure_ascii=False).replace(chr(39), chr(92)+chr(39))}')")
+        con.execute(f"INSERT INTO meta VALUES ('targets', '{json.dumps(data.get('targets', {}), ensure_ascii=False).replace(chr(39), chr(92)+chr(39))}')")
         # quality
         for k, v in data["quality"].items():
             if isinstance(v, (int, float)):
@@ -937,13 +951,18 @@ if __name__=="__main__":
             wk_s = f"'{wk.replace(chr(39), chr(92)+chr(39))}'" if wk else "NULL"
             con.execute(f"INSERT INTO overall VALUES ('{r['date']}', {r.get('shopCount',0)}, {r.get('skuCount',0)}, {r.get('gmv',0)}, {r.get('units',0)}, {r.get('orders',0)}, {r.get('buyers',0)}, {r.get('visitors',0)}, {sqlnum(r.get('conversion'))}, {sqlnum(r.get('aov'))}, {sqlnum(r.get('uvValue'))}, {r.get('addCartUsers',0)}, {r.get('refundAmount',0)}, {sqlnum(r.get('refundRate'))}, {bl_s}, {wk_s})")
         # shop_daily
+        shop_daily_keys = set()
         for shop, rows in data["shopDaily"].items():
             for r in rows:
+                # 数据源异常防护：同店铺同日期多行（如 JITX 多文件日期重叠），明确报错而非静默写入脏数据
+                if (r["date"], r["shopRaw"]) in shop_daily_keys:
+                    raise SystemExit(f"❌ 数据源异常：店铺 {r['shopRaw']} 在 {r['date']} 出现重复数据（多文件日期重叠），请检查导出文件命名与内容是否一致")
+                shop_daily_keys.add((r["date"], r["shopRaw"]))
                 bl = json.dumps(r.get("baseline"), ensure_ascii=False) if r.get("baseline") else None
                 wk = json.dumps(r.get("week"), ensure_ascii=False) if r.get("week") else None
                 bl_s = f"'{bl.replace(chr(39), chr(92)+chr(39))}'" if bl else "NULL"
                 wk_s = f"'{wk.replace(chr(39), chr(92)+chr(39))}'" if wk else "NULL"
-                con.execute(f"INSERT INTO shop_daily VALUES ('{r['date']}', '{r['shopRaw']}', {r.get('skuCount',0)}, {r.get('gmv',0)}, {r.get('units',0)}, {r.get('orders',0)}, {r.get('buyers',0)}, {r.get('visitors',0)}, {sqlnum(r.get('conversion'))}, {sqlnum(r.get('aov'))}, {sqlnum(r.get('uvValue'))}, {r.get('refundAmount',0)}, {sqlnum(r.get('refundRate'))}, {bl_s}, {wk_s}, {sqlnum(r.get('gmvOutbound'))}, {sqlnum(r.get('unitsOutbound'))}, {sqlnum(r.get('stockValue'))}, {sqlnum(r.get('out30dValue'))})")
+                con.execute(f"INSERT INTO shop_daily VALUES ('{r['date']}', '{r['shopRaw']}', {r.get('skuCount',0)}, {r.get('gmv',0)}, {r.get('units',0)}, {r.get('orders',0)}, {r.get('buyers',0)}, {r.get('visitors',0)}, {sqlnum(r.get('conversion'))}, {sqlnum(r.get('aov'))}, {sqlnum(r.get('uvValue'))}, {r.get('refundAmount',0)}, {sqlnum(r.get('refundRate'))}, {bl_s}, {wk_s}, {sqlnum(r.get('gmvOutbound'))}, {sqlnum(r.get('unitsOutbound'))}, {sqlnum(r.get('stockValue'))}, {sqlnum(r.get('out30dValue'))}, {sqlnum(r.get('outMtdValue'))})")
         # categories
         for date, rows in data["categories"].items():
             for r in rows:

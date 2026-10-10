@@ -80,7 +80,7 @@ def handler():
         shop_daily = {}
         for row in con.sql("""SELECT date,shop,sku_count,gmv,units,orders,buyers,visitors,
                    conversion,aov,uv_value,refund_amount,refund_rate,baseline,week,
-                   gmv_outbound,units_outbound,stock_value,out30d_value
+                   gmv_outbound,units_outbound,stock_value,out30d_value,out_mtd_value
                    FROM shop_daily ORDER BY date""").fetchall():
             rec = {"date": row[0], "shopRaw": row[1], "shopDisplay": shop_display.get(row[1], row[1]), "skuCount": row[2], "gmv": row[3],
                    "units": row[4], "orders": row[5], "buyers": row[6], "visitors": row[7],
@@ -91,7 +91,7 @@ def handler():
             rec["gmvOutbound"] = row[15]
             rec["unitsOutbound"] = row[16]
             rec["stockValue"] = row[17]
-            rec["out30dValue"] = row[18]
+            rec["out30dValue"] = row[18];rec["outMtdValue"] = row[19]
             shop_daily.setdefault(row[1], []).append(rec)
 
         # categories
@@ -177,7 +177,7 @@ def handler():
             "overall": overall, "shopDaily": shop_daily,
             "categories": categories, "topSkus": top_skus,
             "movers": movers, "alerts": alerts,
-            "quality": quality, "charts": charts, "cityStock": city_stock, "moduleFilters": json.loads(meta_rows.get("moduleFilters", "{}")) if isinstance(meta_rows.get("moduleFilters", "{}"), str) else (meta_rows.get("moduleFilters") or {}),
+            "quality": quality, "charts": charts, "cityStock": city_stock, "targets": json.loads(meta_rows.get("targets", "{}")) if isinstance(meta_rows.get("targets", "{}"), str) else (meta_rows.get("targets") or {}),
             "optimization": optimization,
         }
         return _resp(200, result)
