@@ -159,7 +159,7 @@ const sameRange=(a,b,c,d)=>a===c&&b===d;
 function quickList(){const last=DATA.dates.at(-1),i=DATA.dates.indexOf(last);
  const mk=(n)=>[DATA.dates[Math.max(0,i-n+1)],last];
  const inMonth=d=>d.slice(0,7)===last.slice(0,7);const mStart=DATA.dates.find(inMonth);const mList=DATA.dates.filter(inMonth);
- return [['今天(最新日)',last,last],['昨天',DATA.dates[Math.max(0,i-1)],DATA.dates[Math.max(0,i-1)]],['近7天',...mk(7)],['近14天',...mk(14)],['近30天',...mk(30)],['本月',mStart,mList.at(-1)]]}
+ return [['最新日',last,last],['近7天',...mk(7)],['近14天',...mk(14)],['近30天',...mk(30)],['本月',mStart,mList.at(-1)]]}
 function activeQuick(){const cur=[state.rs||state.date,state.date];return quickList().findIndex(q=>sameRange(q[1],q[2],cur[0],cur[1]))}
 function renderQ(){const ai=activeQuick();qside.innerHTML=quickList().map((q,k)=>`<button data-k=${k} class=${k===ai?'on':''}>${q[0]}</button>`).join('')+`<div class=sep></div><button data-k=-1 class=${ai<0?'on':''}>自定义</button>`}
 function monthStr(){return calMonth.getFullYear()+'年'+(calMonth.getMonth()+1)+'月'}
