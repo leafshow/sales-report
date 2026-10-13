@@ -16,8 +16,69 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/api/data" or self.path == "/api/data.json":
             self._serve_api()
+        elif self.path == "/api/budan" or self.path == "/budan.json":
+            self._serve_budan()
         else:
             super().do_GET()
+
+    def do_POST(self):
+        if self.path == "/api/budan":
+            self._save_budan()
+        else:
+            self._json_response(404, {"error": "not found"})
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.end_headers()
+
+    BUDAN_PATH = Path(__file__).parent / "budan.json"
+
+    def _serve_budan(self):
+        try:
+            data = json.loads(self.BUDAN_PATH.read_text(encoding="utf-8")) if self.BUDAN_PATH.exists() else {}
+            self._json_response(200, data)
+        except Exception as e:
+            self._json_response(500, {"error": str(e)})
+
+    def _save_budan(self):
+        """本地直写 budan.json：{shopRaw, ym, amount}，amount=null 清除。
+        线上 Vercel 由 api/budan.py 经 GitHub API 提交回仓库，两端口径一致。"""
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(n).decode("utf-8")) if n else {}
+        except Exception:
+            self._json_response(400, {"error": "请求体不是合法 JSON"})
+            return
+        shop = str(body.get("shopRaw", "")).strip()
+        date = str(body.get("date", body.get("ym", ""))).strip()  # 兼容按天 YYYY-MM-DD / 旧按月键
+        amount = body.get("amount")
+        ok_fmt = (len(date) == 10 and date[4] == "-" and date[7] == "-") or (len(date) == 7 and date[4] == "-")
+        if not shop or not ok_fmt:
+            self._json_response(400, {"error": "参数不合法：需要 shopRaw / ym(YYYY-MM) / amount"})
+            return
+        if amount is not None:
+            try:
+                amount = round(float(amount), 2)
+                if amount < 0:
+                    raise ValueError
+            except (TypeError, ValueError):
+                self._json_response(400, {"error": "amount 需为非负数字或 null"})
+                return
+        try:
+            data = json.loads(self.BUDAN_PATH.read_text(encoding="utf-8")) if self.BUDAN_PATH.exists() else {}
+            if amount is None:
+                data.get(shop, {}).pop(date, None)
+                if shop in data and not data[shop]:
+                    del data[shop]
+            else:
+                data.setdefault(shop, {})[date] = amount
+            self.BUDAN_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            self._json_response(200, {"ok": True, "data": data})
+        except Exception as e:
+            self._json_response(500, {"error": str(e)})
 
     def _serve_api(self):
         if not HAS_DUCKDB:
