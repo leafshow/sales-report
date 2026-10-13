@@ -130,13 +130,19 @@ sales-report/
 ```bash
 cd ~/Documents/GitHub/sales-report
 
-# 1. 构建（自动读取四个平台目录，自动同步 db 到 api/）
+# 1. 构建（自动读取各平台目录，自动同步 db 到 api/）
 python3 scripts/build_all_shop_daily.py
+
+# 1b. 增量构建：只重新解析指定平台的源文件，其余平台用上次缓存
+#     （聚合/指标/图表/落库仍全量重算，口径与全量一致；首次使用前需先跑一次全量）
+python3 scripts/build_all_shop_daily.py -p vip        # 或 --platform jd / pdd / jd_self / tmall / vip_jitx
 
 # 2. 提交推送（push 即自动触发 Vercel 部署）
 git add -A && git add -f templates/api/report.duckdb templates/api/data/report.duckdb
 git commit -m "report $(date +%m-%d)" && git push
 ```
+
+> 增量模式说明：缓存位于 `scripts/.build_cache/<平台>.pkl`（平台解析中间产物，自动维护）；某平台当日在后台导出新文件后只需 `-p 该平台` 重跑，无需等全量解析其余平台目录。`config.py` 的 `SHOPS`/`SHOP_TARGETS` 变更影响所有平台时应跑全量。
 
 ### 本地预览
 
@@ -244,6 +250,7 @@ cd templates && python3 server.py
 | 2026-10-11 | `3555f5e` | **月度任务额配置化管线** | `config.py SHOP_TARGETS` 配置每月单店任务额，构建写入 meta `targets` 经 API 透出；自营月至今口径改出库快照（`outMtdValue`）；飞鹤 JITX 接入 |
 | 2026-10-11 | `3123c4a` | **日期选择器精简** | 快捷项删除「昨天」 |
 | 2026-10-12 | — | **总览口径修正 + 月度任务卡片化 + 图片导出** | **① 店铺当日表现列拆分**：月至今销售金额/达成率恒显示（所有店铺口径，自营按出库快照），出库金额/件数与可用库存额/周转天数仅自营口径显示<br>**② 单店联动修复**：选单店后店铺当日表现只显示所选店铺（此前仍显示全平台店铺）<br>**③ 无数据源显示 -**：X月店铺销售总览中零售指标全 0 的合成行（如飞鹤成人自营仅库存快照）GMV/件数/单量/客户/访客/转化/客单价/UV价值/退款率/SKU数统一显示 `-` 而非 0（`hasRetail()`）<br>**④ 月度任务卡片化**：月至今销售金额/月任务额/达成率/时间进度 4 列从明细表移出，改为表格上方一行四卡（达成率/时间进度带进度条与进度线着色），表 20→16 列（自营），消除每行重复月度值<br>**⑤ 图片导出**：店铺销售总览右上角新增「⬇ 导出图片」（html2canvas 2x），导出标题（含月份+平台店铺名）+ 月度四卡 + 分天明细表 |
+| 2026-10-12 | `36d4514` | **指定平台增量构建** | 构建脚本新增 `-p/--platform` 参数：仅重新解析指定平台源文件（jd/vip/pdd/jd_self/tmall/vip_jitx），其余平台从 `scripts/.build_cache/<plat>.pkl` 平台级解析缓存载入中间产物（shop_rows/sku/pairs/city_stock/质量计数）；聚合、指标、图表、落库仍全量重算，产物口径与全量一致（已验证 GMV/行数一致）；单平台日常更新免去全量解析其余平台目录，显著缩短构建时间；无缓存时报错提示先跑全量，`.gitignore` 排除缓存目录 |
 
 ---
 

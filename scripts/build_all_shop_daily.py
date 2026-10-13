@@ -459,10 +459,13 @@ def svg_conversion_chart(rows):
     marker=f'<text class="chart-marker selected" data-date="{latest["date"]}" x="{lx:.1f}" y="{ly-12:.1f}" text-anchor="middle">{latest["conversion"]*100:.2f}%</text>'
     return f'<svg class=chart-svg viewBox="0 0 {width} {height}" role="img" aria-label="每日成交转化率趋势折线图"><text class=sl x="{left}" y="14">成交转化率</text>{"".join(grid)}<path d="{path}" fill="none" stroke="#1657ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>{"".join(points)}{marker}</svg>'
 
-def build():
+def build(plat_only=None):
     # 收集各平台文件：[(path, platform)]
+    # plat_only：指定平台时仅重新解析该平台目录，其余平台从缓存（.build_cache/<plat>.pkl）载入解析中间产物
     file_list=[]
     for plat, pdir in PLATFORM_DIRS.items():
+        if plat_only and plat != plat_only:
+            continue
         if pdir.exists():
             if plat == "pdd":
                 file_list.extend((f, plat) for f in sorted(pdir.glob("*.csv")) if FILE_RE_PDD.match(f.name))
@@ -647,6 +650,51 @@ def build():
                 sk.pop("shop", None)
                 sk.update({"date":date,"shopRaw":key,"shopDisplay":shop_display(key)})
                 sku.setdefault(date,[]).append(sk)
+
+    # ── 平台级解析缓存（增量更新用）──────────────────────────────────
+    # --platform X 时只重新解析 X 的源文件；其余平台从 .build_cache/<plat>.pkl
+    # 载入上次的解析中间产物（shop_rows / sku / pairs / city_stock / quality 计数），
+    # 之后聚合、指标、图表、落库仍全量重算，保证口径与全量构建一致。
+    import pickle
+    CACHE_DIR = Path(__file__).resolve().parent / ".build_cache"
+    CACHE_DIR.mkdir(exist_ok=True)
+    # 本轮实际解析的平台（plat_only 模式下仅一个；全量为全部）
+    parsed_plats = ({plat_only} if plat_only else set(PLATFORM_DIRS))
+    # 保存本轮解析结果（按平台拆分）
+    def _plat_of(key):  # shop_rows/sku 键 → 平台
+        return key.split("|", 1)[0] if isinstance(key, str) else None
+    for plat in parsed_plats:
+        c_shop = {s: rows for s, rows in shop_rows.items() if _plat_of(s) == plat}
+        c_sku = {}
+        for d, lst in sku.items():
+            flt = [x for x in lst if _plat_of(x.get("shopRaw","")) == plat]
+            if flt: c_sku[d] = flt
+        c_pairs = {p for p in pairs if _plat_of(p[0]) == plat}
+        c_city = city_stock if plat == "jd_self" else {}
+        c_q = {"sourceFiles": sum(1 for f, p in file_list if p == plat),
+               "parsedFiles": None,  # per-platform 精确计数不做拆分，见下方载入逻辑
+               "emptyFiles": [x for x in q["emptyFiles"] if x.get("shop","") in [s.split("|",1)[1] for s in c_shop]]}
+        blob = {"shop_rows": c_shop, "sku": c_sku, "pairs": c_pairs, "city_stock": c_city, "q": c_q}
+        with open(CACHE_DIR / f"{plat}.pkl", "wb") as fh:
+            pickle.dump(blob, fh, protocol=pickle.HIGHEST_PROTOCOL)
+    # 载入未解析平台的缓存（plat_only 模式）
+    if plat_only:
+        for plat in PLATFORM_DIRS:
+            if plat in parsed_plats: continue
+            cf = CACHE_DIR / f"{plat}.pkl"
+            if not cf.exists():
+                raise SystemExit(f"❌ 平台 {plat} 无缓存（{cf}）。请先跑一次全量构建：python3 build_all_shop_daily.py")
+            with open(cf, "rb") as fh:
+                blob = pickle.load(fh)
+            shop_rows.update(blob["shop_rows"])
+            for d, lst in blob["sku"].items(): sku.setdefault(d, []).extend(lst)
+            pairs |= blob["pairs"]
+            if plat == "jd_self": city_stock.update(blob["city_stock"])
+            cq = blob.get("q", {})
+            q["sourceFiles"] += cq.get("sourceFiles", 0)
+            q["emptyFiles"] += cq.get("emptyFiles", [])
+        print(f"⚡ 增量模式：仅重新解析 [{plat_only}]，其余平台读缓存 {CACHE_DIR}")
+
     dates=sorted({d for _,d in pairs})
     _pord={p:i for i,p in enumerate(PLATFORMS)}
     shops=sorted(SHOP_META,key=lambda s:(_pord.get(shop_platform(s),99), SHOP_META[s][2]))
@@ -882,13 +930,17 @@ def build():
             "targets":{f"{k[0]}|{k[1]}":v for k,v in config.SHOP_TARGETS.items()}}
 
 if __name__=="__main__":
-    import math
+    import argparse, math
+    ap = argparse.ArgumentParser(description="多平台销售日报构建（全量 / 指定平台增量）")
+    ap.add_argument("-p", "--platform", choices=sorted(PLATFORM_DIRS), default=None,
+                    help="仅重新解析该平台的源文件（其余平台用上次缓存），聚合与落库仍全量重算；不传则全量构建")
+    args = ap.parse_args()
     def _denan(o):
         if isinstance(o,dict): return {k:_denan(v) for k,v in o.items()}
         if isinstance(o,list): return [_denan(v) for v in o]
         if isinstance(o,float) and not math.isfinite(o): return None
         return o
-    data=build()
+    data=build(plat_only=args.platform)
     data=_denan(data)
     slim_keys=["gmv","units","orders","buyers","visitors","conversion","aov","uvValue","addCartUsers","refundRate"]
     all_rows=list(data["overall"])
