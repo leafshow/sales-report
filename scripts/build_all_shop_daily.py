@@ -459,9 +459,10 @@ def svg_conversion_chart(rows):
     marker=f'<text class="chart-marker selected" data-date="{latest["date"]}" x="{lx:.1f}" y="{ly-12:.1f}" text-anchor="middle">{latest["conversion"]*100:.2f}%</text>'
     return f'<svg class=chart-svg viewBox="0 0 {width} {height}" role="img" aria-label="每日成交转化率趋势折线图"><text class=sl x="{left}" y="14">成交转化率</text>{"".join(grid)}<path d="{path}" fill="none" stroke="#1657ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>{"".join(points)}{marker}</svg>'
 
-def build(plat_only=None):
+def build(plat_only=None, force=False):
     # 收集各平台文件：[(path, platform)]
     # plat_only：指定平台时仅重新解析该平台目录，其余平台从缓存（.build_cache/<plat>.pkl）载入解析中间产物
+    # force：忽略目录指纹缓存，强制重新解析全部文件
     file_list=[]
     for plat, pdir in PLATFORM_DIRS.items():
         if plat_only and plat != plat_only:
@@ -490,7 +491,42 @@ def build(plat_only=None):
         "duplicateSkuCount":0,"reconciliationOk":True,"unexpectedShops":[],"windowFiles":[],"emptyFiles":[]}
     shop_rows={s:[] for s in SHOP_META}; sku={}; pairs=set()
     jd_self_files=defaultdict(list)  # date -> [(kind, path)]
-    
+
+    # ── 目录指纹：平台全部源文件 (mtime, size) 摘要；与上次一致 → 该平台直接读缓存跳过解析 ──
+    import pickle
+    CACHE_DIR = Path(__file__).resolve().parent / ".build_cache"
+    CACHE_DIR.mkdir(exist_ok=True)
+    full_file_list = list(file_list)  # 完整文件清单（未过滤），供指纹保存
+    def _fingerprint(plat):
+        return sorted((f.name, int(f.stat().st_mtime), f.stat().st_size) for f, p in full_file_list if p == plat)
+    city_stock = {}
+    unchanged_plats = set()
+    if not force:
+        for plat in {p for _, p in file_list}:
+            fp_file = CACHE_DIR / f"{plat}.fp"
+            if not fp_file.exists(): continue
+            try:
+                if pickle.load(open(fp_file, "rb")) == _fingerprint(plat):
+                    cf = CACHE_DIR / f"{plat}.pkl"
+                    if cf.exists(): unchanged_plats.add(plat)
+            except Exception:
+                pass
+    # 从缓存载入无变化平台的解析产物；剩余平台进入解析
+    for plat in sorted(unchanged_plats):
+        with open(CACHE_DIR / f"{plat}.pkl", "rb") as fh:
+            blob = pickle.load(fh)
+        shop_rows.update(blob["shop_rows"])
+        for d, lst in blob["sku"].items(): sku.setdefault(d, []).extend(lst)
+        pairs |= blob["pairs"]
+        if plat == "jd_self": city_stock.update(blob.get("city_stock", {}))
+        cq = blob.get("q", {})
+        q["sourceFiles"] = q["sourceFiles"] - sum(1 for f, p in file_list if p == plat) + cq.get("sourceFiles", 0)
+        q["emptyFiles"] += cq.get("emptyFiles", [])
+        # 该平台文件与上次完全一致：解析计数按上次口径（≈源文件数，排除空文件）
+        q["parsedFiles"] += cq.get("sourceFiles", 0) - len(cq.get("emptyFiles", []))
+        print(f"⚡ 平台 [{plat}] 源文件无变化，读缓存跳过解析")
+    file_list = [(f, p) for f, p in file_list if p not in unchanged_plats]
+
     # 第一轮：其他平台 + 记录 jd_self 文件按日期分组
     for f, plat in file_list:
         if plat == "jd_self":
@@ -585,7 +621,7 @@ def build(plat_only=None):
             shop_rows[shop].append(total_row(date,shop,total,len(detail),f.name)); sku.setdefault(date,[]).extend(sku_rows(date,shop,detail))
 
     # ── jd_self：按 (日期) 聚合库存表 + 经营状况表，合并为唯一一行 ──
-    city_stock={}
+    # city_stock 已在缓存载入阶段初始化；此处勿重复置空（否则命中缓存的平台数据被清掉）
     for date, entries in sorted(jd_self_files.items()):
         inv={}; traf={}
         for kind, f in entries:
@@ -652,14 +688,15 @@ def build(plat_only=None):
                 sku.setdefault(date,[]).append(sk)
 
     # ── 平台级解析缓存（增量更新用）──────────────────────────────────
-    # --platform X 时只重新解析 X 的源文件；其余平台从 .build_cache/<plat>.pkl
-    # 载入上次的解析中间产物（shop_rows / sku / pairs / city_stock / quality 计数），
-    # 之后聚合、指标、图表、落库仍全量重算，保证口径与全量构建一致。
+    # 无变化平台在循环前已读缓存（见 unchanged_plats）；此处保存本轮实际解析平台的
+    # 解析中间产物 + 目录指纹，之后聚合、指标、图表、落库仍全量重算，口径与全量一致。
     import pickle
     CACHE_DIR = Path(__file__).resolve().parent / ".build_cache"
     CACHE_DIR.mkdir(exist_ok=True)
-    # 本轮实际解析的平台（plat_only 模式下仅一个；全量为全部）
-    parsed_plats = ({plat_only} if plat_only else set(PLATFORM_DIRS))
+    # 本轮实际解析的平台 = 参与解析的 file_list 中的平台
+    parsed_plats = {p for _, p in file_list}
+    def _fingerprint_full(plat):
+        return sorted((f.name, int(f.stat().st_mtime), f.stat().st_size) for f, p in full_file_list if p == plat)
     # 保存本轮解析结果（按平台拆分）
     def _plat_of(key):  # shop_rows/sku 键 → 平台
         return key.split("|", 1)[0] if isinstance(key, str) else None
@@ -671,12 +708,15 @@ def build(plat_only=None):
             if flt: c_sku[d] = flt
         c_pairs = {p for p in pairs if _plat_of(p[0]) == plat}
         c_city = city_stock if plat == "jd_self" else {}
-        c_q = {"sourceFiles": sum(1 for f, p in file_list if p == plat),
-               "parsedFiles": None,  # per-platform 精确计数不做拆分，见下方载入逻辑
+        c_q = {"sourceFiles": sum(1 for f, p in full_file_list if p == plat),
+               "parsedFiles": None,  # per-platform 精确计数不做拆分，见载入逻辑
                "emptyFiles": [x for x in q["emptyFiles"] if x.get("shop","") in [s.split("|",1)[1] for s in c_shop]]}
         blob = {"shop_rows": c_shop, "sku": c_sku, "pairs": c_pairs, "city_stock": c_city, "q": c_q}
         with open(CACHE_DIR / f"{plat}.pkl", "wb") as fh:
             pickle.dump(blob, fh, protocol=pickle.HIGHEST_PROTOCOL)
+        # 指纹基于完整文件清单（含无变化平台），保证 -p 模式不覆盖其他平台指纹
+        with open(CACHE_DIR / f"{plat}.fp", "wb") as fh:
+            pickle.dump(_fingerprint_full(plat), fh, protocol=pickle.HIGHEST_PROTOCOL)
     # 载入未解析平台的缓存（plat_only 模式）
     if plat_only:
         for plat in PLATFORM_DIRS:
@@ -934,13 +974,15 @@ if __name__=="__main__":
     ap = argparse.ArgumentParser(description="多平台销售日报构建（全量 / 指定平台增量）")
     ap.add_argument("-p", "--platform", choices=sorted(PLATFORM_DIRS), default=None,
                     help="仅重新解析该平台的源文件（其余平台用上次缓存），聚合与落库仍全量重算；不传则全量构建")
+    ap.add_argument("-f", "--force", action="store_true",
+                    help="忽略目录指纹缓存，强制重新解析全部源文件（源数据被原地修改/排查缓存问题时使用）")
     args = ap.parse_args()
     def _denan(o):
         if isinstance(o,dict): return {k:_denan(v) for k,v in o.items()}
         if isinstance(o,list): return [_denan(v) for v in o]
         if isinstance(o,float) and not math.isfinite(o): return None
         return o
-    data=build(plat_only=args.platform)
+    data=build(plat_only=args.platform, force=args.force)
     data=_denan(data)
     slim_keys=["gmv","units","orders","buyers","visitors","conversion","aov","uvValue","addCartUsers","refundRate"]
     all_rows=list(data["overall"])
