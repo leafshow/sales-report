@@ -1964,7 +1964,8 @@
         }
         /* 每月单店销售任务指标由 scripts/config.py SHOP_TARGETS 配置，经构建写入 API targets 字段 */
         function mtdSales(c, ym0) {
-          /* 月至今销售金额（与店铺当日表现一致）：自营=出库口径月至今，非自营=该月GMV求和 */
+          /* 月至今销售金额：自营=逐日出库金额累加（与「出库金额」列同口径，避免月中采购价调整
+             导致京东快照值按新价重算历史、与日累加出现差额）；非自营=该月GMV求和 */
           const last = ym0
             ? [...DATA.dates].reverse().find((d) => d.slice(0, 7) === ym0)
             : DATA.dates.at(-1);
@@ -1973,8 +1974,9 @@
             const rows = (DATA.shopDaily[c.shopRaw] || []).filter(
               (x) => x.date.slice(0, 7) === ym && x.date <= last,
             );
-            const snap = rows.length ? rows[rows.length - 1] : null;
-            return snap && snap.outMtdValue != null ? snap.outMtdValue : null;
+            return rows.length
+              ? rows.reduce((s, x) => s + (x.gmvOutbound || 0), 0)
+              : null;
           }
           const rows = (DATA.shopDaily[c.shopRaw] || []).filter(
             (x) => x.date.slice(0, 7) === ym && x.date <= last,
