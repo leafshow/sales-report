@@ -423,14 +423,17 @@ def svg_gmv_chart(rows):
         grid.append(f'<line x1="{left}" y1="{yy:.1f}" x2="{width-right}" y2="{yy:.1f}" stroke="#e5eaf2"/><text x="{left-8}" y="{yy+4:.1f}" text-anchor="end" class=sl>¥{value/10000:.1f}万</text>')
     bars=[]
     for i,row in enumerate(rows):
-        value=row["gmv"]; xx=x(i)-bar_width/2; yy=y(value); bar_h=max(2,plot_h-(yy-top)); selected=" selected" if row["date"]==rows[-1]["date"] else ""
+        value=row["gmv"]; xx=x(i)-bar_width/2; yy=y(value); bar_h=max(2,plot_h-(yy-top))
         label=f'{row["date"]}：¥{value:,.2f}'
-        bars.append(f'<rect class="chart-bar{selected}" data-date="{row["date"]}" x="{xx:.1f}" y="{yy:.1f}" width="{bar_width:.1f}" height="{bar_h:.1f}" rx="4" fill="#1657ff"><title>{label}</title></rect>')
-        if i%2==0:
-            bars.append(f'<text class=sl x="{x(i):.1f}" y="{height-18}" text-anchor="middle">{row["date"][5:]}</text>')
+        bars.append(f'<rect class="chart-bar" data-date="{row["date"]}" x="{xx:.1f}" y="{yy:.1f}" width="{bar_width:.1f}" height="{bar_h:.1f}" rx="4" fill="#1657ff"><title>{label}</title></rect>')
+        # 全部日期均显示刻度；间距密时围绕自身锚点 -60° 斜排防重叠
+        tick_rot=" rotate(-60 {0:.1f} {1:.1f})".format if slot<34 else (lambda _x,_y:"")
+        bars.append(f'<text class=sl x="{x(i):.1f}" y="{height-18}" text-anchor="middle" transform="{tick_rot(x(i),height-18)}">{row["date"][5:]}</text>')
     latest=max(rows,key=lambda z:z["date"]); lx=x(rows.index(latest)); ly=y(latest["gmv"])
-    marker=f'<text class="chart-marker selected" data-date="{latest["date"]}" x="{lx:.1f}" y="{ly-10:.1f}" text-anchor="middle">¥{latest["gmv"]/10000:.1f}万</text>'
-    return f'<svg class=chart-svg viewBox="0 0 {width} {height}" role="img" aria-label="每日GMV趋势柱状图"><text class=sl x="{left}" y="14">GMV</text>{"".join(grid)}{"".join(bars)}{marker}</svg>'
+    # 数值改悬停查看：柱自带 <title> 提示，不再静态绘制数值标签，保持与转化率图一致
+    labels=""
+    marker=""
+    return f'<svg class=chart-svg viewBox="0 0 {width} {height}" role="img" aria-label="每日GMV趋势柱状图"><text class=sl x="{left}" y="14">GMV</text>{"".join(grid)}{"".join(bars)}{labels}{marker}</svg>'
 
 def svg_conversion_chart(rows):
     if not rows:
@@ -451,13 +454,22 @@ def svg_conversion_chart(rows):
     points=[]
     for i,row in enumerate(rows):
         if row.get("conversion") is None: continue
-        xx,yy=x(i),y(row["conversion"]); selected=" selected" if row["date"]==rows[-1]["date"] else ""
-        points.append(f'<circle class="chart-point{selected}" data-date="{row["date"]}" cx="{xx:.1f}" cy="{yy:.1f}" r="4" fill="#1657ff" stroke="#fff" stroke-width="2"><title>{row["date"]}：{row["conversion"]*100:.2f}%</title></circle>')
-        if i%2==0:points.append(f'<text class=sl x="{xx:.1f}" y="{height-14}" text-anchor="middle">{row["date"][5:]}</text>')
+        xx,yy=x(i),y(row["conversion"])
+        points.append(f'<circle class="chart-point" data-date="{row["date"]}" cx="{xx:.1f}" cy="{yy:.1f}" r="4" fill="#1657ff" stroke="#fff" stroke-width="2"><title>{row["date"]}：{row["conversion"]*100:.2f}%</title></circle>')
+        # 全部日期均显示刻度；间距密时围绕自身锚点 -60° 斜排防重叠
+        _step=plot_w/max(1,len(rows)-1); tick_rot=" rotate(-60 {0:.1f} {1:.1f})".format if _step<44 else (lambda _x,_y:"")
+        points.append(f'<text class=sl x="{xx:.1f}" y="{height-14}" text-anchor="middle" transform="{tick_rot(xx,height-14)}">{row["date"][5:]}</text>')
     path=" ".join(("M" if i==0 else "L")+f'{x(i):.1f},{y(row["conversion"]):.1f}' for i,row in enumerate(rows) if row.get("conversion") is not None)
     latest=max(rows,key=lambda z:z["date"]); lx,ly=x(rows.index(latest)),y(latest["conversion"])
-    marker=f'<text class="chart-marker selected" data-date="{latest["date"]}" x="{lx:.1f}" y="{ly-12:.1f}" text-anchor="middle">{latest["conversion"]*100:.2f}%</text>'
-    return f'<svg class=chart-svg viewBox="0 0 {width} {height}" role="img" aria-label="每日成交转化率趋势折线图"><text class=sl x="{left}" y="14">成交转化率</text>{"".join(grid)}<path d="{path}" fill="none" stroke="#1657ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>{"".join(points)}{marker}</svg>'
+    step=plot_w/max(1,len(rows)-1)
+    # 数值标签：最多展示最近一个完整月(31点)；过密时围绕标签自身锚点 -60° 斜排；上移避让折线
+    shown={id(r) for r in rows[-31:]}
+    rot=" rotate(-60 {0:.1f} {1:.1f})".format if step<44 else (lambda _x,_y:"")
+    # 末行不再额外叠 marker，逐点数值已覆盖
+    # 数值改悬停查看：点自带 <title> 提示，不再静态绘制数值标签，避免拥挤重叠
+    labels=""
+    marker=""
+    return f'<svg class=chart-svg viewBox="0 0 {width} {height}" role="img" aria-label="每日成交转化率趋势折线图"><text class=sl x="{left}" y="14">成交转化率</text>{"".join(grid)}<path d="{path}" fill="none" stroke="#1657ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>{"".join(points)}{labels}{marker}</svg>'
 
 def build(plat_only=None, force=False):
     # 收集各平台文件：[(path, platform)]
@@ -836,7 +848,10 @@ def build(plat_only=None, force=False):
         if ef["date"] not in missing_dates:
             missing_dates.append(ef["date"])
     q["missingDates"] = sorted(missing_dates); q["isFresh"] = not q["missingDates"]
-    charts={"ALL":{"gmv":svg_gmv_chart(overall),"conversion":svg_conversion_chart(overall)}}
+    # 图表以月度展示：默认取末行所在月
+    def month_rows(rs):
+        return rs if not rs else [r for r in rs if r["date"][:7]==rs[-1]["date"][:7]]
+    charts={"ALL":{"gmv":svg_gmv_chart(month_rows(overall)),"conversion":svg_conversion_chart(month_rows(overall))}}
     # 按平台聚合图表（前端平台切换时使用）
     for plat in PLATFORMS:
         plat_shops=[s for s in shops if shop_platform(s)==plat]
@@ -848,9 +863,9 @@ def build(plat_only=None, force=False):
             x={"date":date,"shopCount":len(cur),"skuCount":sum(z["skuCount"] for z in cur)}
             for k in FIELDS:x[k]=sum(z[k] for z in cur)
             plat_overall.append(calc(x))
-        charts[plat]={"gmv":svg_gmv_chart(plat_overall),"conversion":svg_conversion_chart(plat_overall)}
+        charts[plat]={"gmv":svg_gmv_chart(month_rows(plat_overall)),"conversion":svg_conversion_chart(month_rows(plat_overall))}
     for shop in shops:
-        charts[shop]={"gmv":svg_gmv_chart(shop_rows[shop]),"conversion":svg_conversion_chart(shop_rows[shop])}
+        charts[shop]={"gmv":svg_gmv_chart(month_rows(shop_rows[shop])),"conversion":svg_conversion_chart(month_rows(shop_rows[shop]))}
     recent_dates=dates[-RECENT_DAYS:]
     prior_dates=dates[-RESEARCH_DAYS:-RECENT_DAYS] if len(dates)>=RESEARCH_DAYS else dates[:max(0,len(dates)-RECENT_DAYS)]
     def window_rows(rows,window):

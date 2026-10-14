@@ -329,6 +329,21 @@
         height: auto;
         display: block;
       }
+      /* 图表自定义 tooltip：零延迟显示、加粗调大（替代原生 <title> 的系统延迟小字） */
+      #chart-tip {
+        position: fixed;
+        z-index: 99;
+        pointer-events: none;
+        display: none;
+        background: #162233;
+        color: #fff;
+        font-size: 15px;
+        font-weight: 700;
+        padding: 6px 12px;
+        border-radius: 8px;
+        box-shadow: 0 4px 14px rgba(22, 34, 51, 0.3);
+        white-space: nowrap;
+      }
       /* 集中度表：「最高GMV SKU」列表头与内容同向左对齐，仅影响本表 */
       #opt-concentration-table th:nth-child(6) {
         text-align: left;
@@ -345,11 +360,20 @@
       .chart-bar {
         fill: #1657ff;
       }
+      .chart-bar:hover {
+        fill: #f07d12;
+      }
       .chart-bar.selected {
         fill: #f07d12;
       }
       .chart-point {
         fill: #1657ff;
+        transition: r 0.12s;
+      }
+      .chart-point:hover {
+        r: 7;
+        stroke: #f07d12;
+        stroke-width: 2;
       }
       .chart-point.selected {
         fill: #f07d12;
@@ -1107,7 +1131,7 @@
               <div>
                 <h2>GMV 趋势</h2>
                 <div class="note">
-                  橙色为当前选择日期；可切换全部店铺或单店铺。
+                  悬停柱体可查看当日 GMV；可切换全部店铺或单店铺。
                 </div>
               </div>
             </div>
@@ -1941,27 +1965,119 @@
             )
             .join("");
         }
+        /* ── 前端绘制 GMV / 转化率趋势图（随时间区间联动：有区间时只绘区间日期，单日时绘全期高亮当日） ── */
+        function chartRows() {
+          let rows;
+          if (state.shop !== "ALL") {
+            rows = DATA.shopDaily[state.shop] || [];
+          } else if (state.platform === "ALL") {
+            rows = DATA.overall || [];
+          } else {
+            // 平台级：聚合该平台各店逐日（gmv/units/orders/buyers/visitors/refundAmount/skuCount 求和，转化率=买家/访客）
+            const shops = Object.keys(DATA.shopDaily).filter((s) => s.split("|")[0] === state.platform);
+            const byDate = {};
+            shops.forEach((s) =>
+              (DATA.shopDaily[s] || []).forEach((x) => {
+                const o = (byDate[x.date] = byDate[x.date] || { date: x.date, gmv: 0, buyers: 0, visitors: 0 });
+                o.gmv += x.gmv || 0; o.buyers += x.buyers || 0; o.visitors += x.visitors || 0;
+              }),
+            );
+            rows = Object.values(byDate).sort((a, b) => (a.date < b.date ? -1 : 1));
+            rows.forEach((o) => (o.conversion = o.buyers && o.visitors ? o.buyers / o.visitors : null));
+          }
+          rows = [...rows].sort((a, b) => (a.date < b.date ? -1 : 1));
+          /* 以月度展示：日期选择在哪个月就显示哪个月（忽略区间起点 rs） */
+          const ym = (state.date || "").slice(0, 7);
+          return ym ? rows.filter((x) => x.date.slice(0, 7) === ym) : rows;
+        }
+        function svgGmvChart(rows) {
+          if (!rows.length) return "<div class=callout>暂无GMV趋势数据。</div>";
+          const W = 980, H = 320, L = 58, R = 18, T = 22, B = 56, pw = W - L - R, ph = H - T - B;
+          const maxV = Math.max(...rows.map((x) => x.gmv)) * 1.12 || 1;
+          const slot = pw / rows.length, bw = Math.min(28, slot * 0.62);
+          const x = (i) => L + i * slot + slot / 2, y = (v) => T + (1 - v / maxV) * ph;
+          let grid = "";
+          for (const t of [0, 0.25, 0.5, 0.75, 1]) {
+            const v = maxV * t, yy = y(v);
+            grid += `<line x1="${L}" y1="${yy.toFixed(1)}" x2="${W - R}" y2="${yy.toFixed(1)}" stroke="#e5eaf2"/><text x="${L - 8}" y="${(yy + 4).toFixed(1)}" text-anchor="end" class=sl>¥${(v / 10000).toFixed(1)}万</text>`;
+          }
+          let bars = "", latest = rows[rows.length - 1], li = rows.length - 1;
+          rows.forEach((row, i) => {
+            const v = row.gmv, xx = x(i) - bw / 2, yy = y(v), bh = Math.max(2, ph - (yy - T));
+            bars += `<rect class="chart-bar" data-date="${row.date}" x="${xx.toFixed(1)}" y="${yy.toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" rx="4" fill="#1657ff"><title>${row.date}：¥${v.toLocaleString("en-US", { minimumFractionDigits: 2 })}</title></rect>`;
+            const tyy = H - 18, trot = slot < 34 ? ` rotate(-60 ${x(i).toFixed(1)} ${tyy})` : "";
+            bars += `<text class=sl x="${x(i).toFixed(1)}" y="${tyy}" text-anchor="middle" transform="${trot}">${row.date.slice(5)}</text>`;
+          });
+          const marker = "";
+          // 数值改悬停查看：柱自带 <title> 提示，不再静态绘制数值标签，保持与转化率图一致
+          const labels = "";
+          return `<svg class=chart-svg viewBox="0 0 ${W} ${H}" role="img" aria-label="每日GMV趋势柱状图"><text class=sl x="${L}" y="14">GMV</text>${grid}${bars}${labels}${marker}</svg>`;
+        }
+        function svgConvChart(rows) {
+          rows = rows.filter((x) => x.conversion != null);
+          if (!rows.length) return "<div class=callout>暂无转化率数据（该平台未提供流量/转化指标）。</div>";
+          const W = 980, H = 300, L = 52, R = 20, T = 22, B = 50, pw = W - L - R, ph = H - T - B;
+          const vals = rows.map((x) => x.conversion), vmin = Math.min(...vals), vmax = Math.max(...vals);
+          const pad = ((vmax - vmin) || vmax || 0.01) * 0.22, y0 = Math.max(0, vmin - pad), y1 = vmax + pad;
+          const x = (i) => L + (i * pw) / Math.max(1, rows.length - 1), y = (v) => T + (1 - (v - y0) / (y1 - y0)) * ph;
+          let grid = "";
+          for (const t of [0, 0.25, 0.5, 0.75, 1]) {
+            const v = y0 + t * (y1 - y0), yy = y(v);
+            grid += `<line x1="${L}" y1="${yy.toFixed(1)}" x2="${W - R}" y2="${yy.toFixed(1)}" stroke="#e5eaf2"/><text x="${L - 8}" y="${(yy + 4).toFixed(1)}" text-anchor="end" class=sl>${(v * 100).toFixed(1)}%</text>`;
+          }
+          let pts = "", path = "";
+          const step = pw / Math.max(1, rows.length - 1);
+          rows.forEach((row, i) => {
+            const xx = x(i).toFixed(1), yy = y(row.conversion).toFixed(1);
+            path += (i === 0 ? "M" : "L") + xx + "," + yy + " ";
+            pts += `<circle class="chart-point" data-date="${row.date}" cx="${xx}" cy="${yy}" r="4" fill="#1657ff" stroke="#fff" stroke-width="2"><title>${row.date}：${(row.conversion * 100).toFixed(2)}%</title></circle>`;
+            const ctyy = H - 14, ctrot = step < 44 ? ` rotate(-60 ${xx} ${ctyy})` : "";
+            pts += `<text class=sl x="${xx}" y="${ctyy}" text-anchor="middle" transform="${ctrot}">${row.date.slice(5)}</text>`;
+          });
+          const latest = rows[rows.length - 1], li = rows.length - 1;
+          const marker = "";
+          const cshown = new Set(rows.slice(-31));
+          const crot2 = (tx, yy) => (step < 44 ? ` rotate(-60 ${tx.toFixed(1)} ${yy.toFixed(1)})` : "");
+          // 数值改悬停查看：点自带 <title> 提示，不再静态绘制数值标签，避免拥挤重叠
+          const clabels = "";
+          return `<svg class=chart-svg viewBox="0 0 ${W} ${H}" role="img" aria-label="每日成交转化率趋势折线图"><text class=sl x="${L}" y="14">成交转化率</text>${grid}<path d="${path}" fill="none" stroke="#1657ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>${pts}${clabels}${marker}</svg>`;
+        }
         function renderCharts() {
-          const c =
-            state.shop !== "ALL"
-              ? DATA.charts[state.shop]
-              : DATA.charts[state.platform] || DATA.charts.ALL;
-          document.getElementById("gmv-chart").innerHTML = c.gmv;
-          document.getElementById("conv").innerHTML = c.conversion;
+          const rows = chartRows();
+          document.getElementById("gmv-chart").innerHTML = svgGmvChart(rows);
+          document.getElementById("conv").innerHTML = svgConvChart(rows);
           syncChartSelection();
         }
         function syncChartSelection() {
+          /* 图表配色统一纯蓝：不再做选中/区间高亮（明细表保留 tr.sel/tr.insel 高亮） */
           document
             .querySelectorAll("#gmv-chart [data-date], #conv [data-date]")
             .forEach((el) => {
-              const d = el.dataset.date;
-              el.classList.toggle("selected", d === state.date);
-              el.classList.toggle(
-                "insel",
-                !!(state.rs && d >= state.rs && d <= state.date),
-              );
+              el.classList.remove("insel", "selected");
             });
         }
+        /* 图表自定义 tooltip：事件委托，零延迟跟随鼠标 */
+        (function initChartTip() {
+          if (document.getElementById("chart-tip")) return;
+          const tip = document.createElement("div");
+          tip.id = "chart-tip";
+          document.body.appendChild(tip);
+          const move = (e) => {
+            const el = e.target.closest && e.target.closest("#gmv-chart [data-date], #conv [data-date]");
+            const t = el && el.querySelector("title");
+            if (el && t) {
+              tip.textContent = t.textContent;
+              tip.style.display = "block";
+              const x = Math.min(e.clientX + 14, window.innerWidth - tip.offsetWidth - 8);
+              tip.style.left = x + "px";
+              tip.style.top = (e.clientY - 40) + "px";
+            } else {
+              tip.style.display = "none";
+            }
+          };
+          document.addEventListener("mousemove", move, { passive: true });
+          document.addEventListener("scroll", () => (tip.style.display = "none"), { passive: true });
+        })();
         /* 每月单店销售任务指标由 scripts/config.py SHOP_TARGETS 配置，经构建写入 API targets 字段 */
         function mtdSales(c, ym0) {
           /* 月至今销售金额：自营=逐日出库金额累加（与「出库金额」列同口径，避免月中采购价调整
@@ -2102,7 +2218,7 @@
                   ? `<td>${c.shopRaw.indexOf("jd_self|") === 0 && c.stockValue != null ? M2(c.stockValue) : "-"}</td><td>${c.shopRaw.indexOf("jd_self|") === 0 && c.out30dValue > 0 && c.stockValue > 0 ? (c.stockValue / (c.out30dValue / 30)).toFixed(1) + " 天" : "-"}</td>`
                   : "");
               const hasT = (c.gmv || 0) > 0 || (c.visitors || 0) > 0;
-              return `<tr class="${state.shop === c.shopRaw ? "sel" : ""}"><td>${E(c.shopDisplay)}</td>${oc}<td>${hasT ? M2(c.gmv) : "-"}</td><td>${hasT ? P1(c.gmv / total) : "-"}</td><td>${hasT ? SP(ch(c.gmv, p.gmv)) : "-"}</td><td>${hasT ? SP((c.gmv - p.gmv) / pt) : "-"}</td><td>${hasT ? I(c.visitors) : "-"}</td><td>${SP(ch(c.visitors, p.visitors))}</td><td>${P(c.conversion)}</td><td>${PP(df(c.conversion, p.conversion))}</td><td>${M2(c.aov)}</td><td>${M2(c.uvValue)}</td><td>${P(c.refundRate)}</td></tr>`;
+              return `<tr class="${state.shop === c.shopRaw ? "sel" : ""}"><td>${E(c.shopDisplay)}</td>${oc}<td>${hasT ? M2(c.gmv) : "-"}</td><td>${hasT ? P1(c.gmv / total) : "-"}</td><td>${hasT ? SP(ch(c.gmv, p.gmv)) : "-"}</td><td>${hasT && pt > 0 ? SP((c.gmv - p.gmv) / pt) : "-"}</td><td>${hasT ? I(c.visitors) : "-"}</td><td>${SP(ch(c.visitors, p.visitors))}</td><td>${P(c.conversion)}</td><td>${PP(df(c.conversion, p.conversion))}</td><td>${M2(c.aov)}</td><td>${M2(c.uvValue)}</td><td>${P(c.refundRate)}</td></tr>`;
             })
             .join("")}</tbody>`;
         }

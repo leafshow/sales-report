@@ -13,6 +13,12 @@ except ImportError:
 
 
 class Handler(SimpleHTTPRequestHandler):
+    def end_headers(self):
+        # 本地开发禁用缓存，避免改版后浏览器仍用旧 HTML/JS
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self.send_header("Pragma", "no-cache")
+        super().end_headers()
+
     def do_GET(self):
         if self.path == "/api/data" or self.path == "/api/data.json":
             self._serve_api()
