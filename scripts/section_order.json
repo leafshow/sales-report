@@ -1,0 +1,18 @@
+[
+  "conclusion | 经营结论",
+  "kpi | 核心 KPI",
+  "gmv-trend | GMV 趋势",
+  "conv-trend | 成交转化率趋势",
+  "shop-daily | 店铺当日表现",
+  "attribution | GMV 变化归因",
+  "optimize | 7日优化研究",
+  "stocksec | 自营库存健康",
+  "citysec | 头部商品城市库存预警",
+  "category | 类目结构",
+  "sku-daily | 当日 SKU 表现",
+  "sku-rise | GMV 增长 SKU",
+  "sku-fall | GMV 下滑 SKU",
+  "alerts | 异常与机会预警",
+  "month-target | 本月店铺销售总览",
+  "quality | 数据质量与口径"
+]

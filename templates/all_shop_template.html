@@ -410,6 +410,21 @@
         color: var(--brand);
         background: var(--soft);
       }
+      /* 标题栏深色横幅上的导出按钮：与日期选择按钮同风格（白透明底白字） */
+      header .export-btn {
+        border-color: rgba(255, 255, 255, 0.45);
+        background: rgba(255, 255, 255, 0.14);
+        color: #fff;
+      }
+      header .export-btn:hover {
+        border-color: #fff;
+        color: #fff;
+        background: rgba(255, 255, 255, 0.26);
+      }
+      header .export-btn:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
       .shopbars {
         display: grid;
         gap: 10px;
@@ -1053,6 +1068,7 @@
             </div>
             <label for="shop">店铺</label
             ><select id="shop"></select>
+            <button type="button" id="header-export" class="export-btn" title="导出：本月店铺销售总览 + 当日 SKU 表现">⬇ 导出日报图</button>
           </div>
         </div>
         <div class="meta">
@@ -1064,7 +1080,7 @@
         <div class="freshness" id="freshness"></div>
       </header>
       <main>
-        <section>
+        <section data-sec="conclusion">
           <div class="head">
             <div>
               <h2>经营结论</h2>
@@ -1076,7 +1092,7 @@
           </div>
           <div class="insights" id="insights-box"></div>
         </section>
-        <section>
+        <section data-sec="kpi">
           <div class="head">
             <div>
               <h2>核心 KPI</h2>
@@ -1087,7 +1103,7 @@
           </div>
           <div class="grid10" id="kpi-grid"></div>
         </section>
-        <section>
+        <section data-sec="attribution">
           <div class="head">
             <div>
               <h2>GMV 变化归因</h2>
@@ -1100,7 +1116,7 @@
           <div class="impact-grid" id="impact-grid"></div>
           <div class="impact-bars" id="impact-bars"></div>
         </section>
-        <section>
+        <section data-sec="optimize">
           <div class="head">
             <div>
               <h2>7日优化研究</h2>
@@ -1126,7 +1142,7 @@
           <div class="wrap"><table id="opt-concentration-table"></table></div>
         </section>
         <div class="charts">
-          <section>
+          <section data-sec="gmv-trend">
             <div class="head">
               <div>
                 <h2>GMV 趋势</h2>
@@ -1139,7 +1155,7 @@
               __GMV_CHART__
             </div>
           </section>
-          <section>
+          <section data-sec="conv-trend">
             <div class="head">
               <div>
                 <h2>成交转化率趋势</h2>
@@ -1151,7 +1167,7 @@
             </div>
           </section>
         </div>
-        <section>
+        <section data-sec="shop-daily">
           <div class="head">
             <div>
               <h2>店铺当日表现<span id="shopsec-title-shop" class="title-shop"></span></h2>
@@ -1164,7 +1180,7 @@
           </div>
           <div class="wrap"><table id="shoptable"></table></div>
         </section>
-        <section id="stocksec" hidden>
+        <section id="stocksec" hidden data-sec="stocksec">
           <div class="head">
             <div>
               <h2>自营库存健康</h2>
@@ -1175,7 +1191,7 @@
           </div>
           <div class="wrap"><table id="stocktable"></table></div>
         </section>
-        <section id="citysec" hidden>
+        <section id="citysec" hidden data-sec="citysec">
           <div class="head">
             <div>
               <h2>头部商品城市库存预警</h2>
@@ -1193,7 +1209,7 @@
             <table id="citytable"></table>
           </div>
         </section>
-        <section>
+        <section data-sec="category">
           <div class="head">
             <div>
               <h2>类目结构</h2>
@@ -1204,7 +1220,7 @@
           </div>
           <div class="wrap"><table id="cattable"></table></div>
         </section>
-        <section>
+        <section data-sec="sku-daily">
           <div class="head">
             <div>
               <h2>当日 SKU 表现</h2>
@@ -1214,7 +1230,7 @@
           <div class="wrap"><table id="skutable"></table></div>
         </section>
         <div class="split">
-          <section>
+          <section data-sec="sku-rise">
             <div class="head">
               <div>
                 <h2>GMV 增长 SKU</h2>
@@ -1225,7 +1241,7 @@
             </div>
             <div class="wrap"><table id="riser"></table></div>
           </section>
-          <section>
+          <section data-sec="sku-fall">
             <div class="head">
               <div>
                 <h2>GMV 下滑 SKU</h2>
@@ -1237,7 +1253,7 @@
             <div class="wrap"><table id="faller"></table></div>
           </section>
         </div>
-        <section>
+        <section data-sec="alerts">
           <div class="head">
             <div>
               <h2>异常与机会预警</h2>
@@ -1249,7 +1265,7 @@
           </div>
           <div class="alerts" id="alert-list"></div>
         </section>
-        <section>
+        <section data-sec="month-target">
           <div class="head">
             <div>
               <h2>
@@ -1266,7 +1282,7 @@
           <div class="wrap"><table id="daily-table"></table></div>
           <div class="wrap" id="dailysec-shot" hidden></div>
         </section>
-        <section>
+        <section data-sec="quality">
           <div class="head">
             <div>
               <h2>数据质量与口径</h2>
@@ -2056,6 +2072,24 @@
               el.classList.remove("insel", "selected");
             });
         }
+        /* 首页模块顺序：读取 scripts/section_order.json（构建时注入 __SECTION_ORDER__），按序重排 main 下的 section。
+           同行网格组(.charts 趋势图 / .split 涨跌SKU)以容器为移动单元，保持同行布局 */
+        (function applySectionOrder() {
+          let order = null;
+          try { order = JSON.parse("__SECTION_ORDER__"); } catch (e) { order = null; }
+          if (!Array.isArray(order) || !order.length) return;
+          const main = document.querySelector("main");
+          if (!main) return;
+          const placed = new Set();
+          order.forEach((k) => {
+            const sec = main.querySelector('[data-sec="' + k + '"]');
+            if (!sec) return;
+            const unit = sec.closest(".charts, .split") || sec; /* 组内成员→移动整个组 */
+            if (placed.has(unit)) return;
+            placed.add(unit);
+            main.appendChild(unit);
+          });
+        })();
         /* 图表自定义 tooltip：事件委托，零延迟跟随鼠标 */
         (function initChartTip() {
           if (document.getElementById("chart-tip")) return;
@@ -3091,14 +3125,14 @@
           btn.textContent = "导出图片";
         };
       })();
-      /* x月店铺销售总览：导出月度任务卡+分天明细表为图片 */
+      /* x月店铺销售总览：导出月度任务卡+分天明细表(+当日SKU表)为图片；标题栏「导出日报图」复用同一逻辑 */
       (function () {
-        const btn = document.getElementById("dailysec-export");
-        if (!btn) return;
-        btn.onclick = async () => {
-          const sec = btn.closest("section");
-          btn.disabled = true;
-          btn.textContent = "生成中…";
+        const exportDailyShot = async function () {
+          const btn = this instanceof Element ? this : null;
+          /* 标题克隆固定取总览 section（header 按钮不在 section 内） */
+          const sec = document.querySelector('[data-sec="month-target"]');
+          const label = btn ? btn.textContent : "";
+          if (btn) { btn.disabled = true; btn.textContent = "生成中…"; }
           try {
             if (!window.html2canvas) {
               await new Promise((res, rej) => {
@@ -3116,12 +3150,29 @@
             shot.style.display = "flex";
             shot.style.flexDirection = "column";
             shot.style.gap = "12px";
-            const headClone = btn.closest("section").querySelector(".head > div").cloneNode(true);
+            const headClone = sec.querySelector(".head > div").cloneNode(true);
             shot.append(
               headClone,
               document.getElementById("month-target").cloneNode(true),
               document.getElementById("daily-table").cloneNode(true),
             );
+            /* 输入框替换为纯文本：html2canvas 渲染 input 易与文字重合，导出图只需数值。
+               注意 M2 是 init() 内局部量，此处用 Number.toLocaleString 就地格式化 */
+            shot.querySelectorAll("input[type='number']").forEach((inp) => {
+              const txt = document.createElement("span");
+              const v = +inp.value;
+              txt.textContent = inp.value && v > 0 ? "¥" + v.toLocaleString("zh-CN", { minimumFractionDigits: 2 }) : "-";
+              txt.style.cssText = "font-size:12px";
+              inp.replaceWith(txt);
+            });
+            /* 合并「当日 SKU 表现」标题+表格一并导出 */
+            const skuSec = document.querySelector('[data-sec="sku-daily"]');
+            if (skuSec) {
+              const skuHead = skuSec.querySelector(".head > div");
+              const skuTable = skuSec.querySelector(".wrap");
+              if (skuHead) shot.append(skuHead.cloneNode(true));
+              if (skuTable) shot.append(skuTable.cloneNode(true));
+            }
             const canvas = await html2canvas(shot, {
               backgroundColor: "#fff",
               scale: 2,
@@ -3137,9 +3188,12 @@
           } catch (e) {
             alert("导出失败：" + e.message);
           }
-          btn.disabled = false;
-          btn.textContent = "导出图片";
+          if (btn) { btn.disabled = false; btn.textContent = label || "导出图片"; }
         };
+        const dailyBtn = document.getElementById("dailysec-export");
+        if (dailyBtn) dailyBtn.onclick = exportDailyShot;
+        const headerBtn = document.getElementById("header-export");
+        if (headerBtn) headerBtn.onclick = exportDailyShot;
       })();
     </script>
   </body>

@@ -1012,6 +1012,15 @@ if __name__=="__main__":
     html = TEMPLATE.read_text(encoding="utf-8")
     html = html.replace("__GMV_CHART__", data["charts"]["ALL"]["gmv"])
     html = html.replace("__CONV_CHART__", data["charts"]["ALL"]["conversion"])
+    # 首页模块排布顺序：读 scripts/section_order.json（格式 ["模块ID | 中文名", ...]，按行序排列）；
+    # 缺省/损坏时保持模板默认；未列出的模块排在最后
+    try:
+        _so = json.loads((TEMPLATE.parent.parent / "scripts" / "section_order.json").read_text(encoding="utf-8"))
+        _ids = [str(x).split("|")[0].strip() for x in _so if str(x).strip()]
+        _order = json.dumps(_ids, ensure_ascii=False).replace('"', '\\"')
+    except Exception:
+        _order = "[]"
+    html = html.replace("__SECTION_ORDER__", _order)
     OUT.write_text(html, encoding="utf-8")
     # ④ 写入 DuckDB 数据库（Vercel serverless function 运行时读取）
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
