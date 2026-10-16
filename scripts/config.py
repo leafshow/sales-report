@@ -113,6 +113,8 @@ JD_CITY_SOURCE = os.environ.get('JD_CITY_SOURCE', 'vertical')
 MAIN_CITIES = ['北京', '上海', '广州', '成都', '武汉', '沈阳', '西安']
 # 京东自营流量表（经营状况）：{供应商名}_经营状况商品明细_{日期}.xlsx（商智标准字段）
 FILE_PATTERN_JD_SELF_TRAFFIC = r'^(.+)_经营状况商品明细_(\d{4}-\d{2}-\d{2})\.xlsx$'
+# 京东自营店铺排行表（商智按日导出，店铺级去重口径，8 列）
+FILE_PATTERN_JD_SELF_SHOPRANK = r'^(.+)_店铺排行_(\d{4}-\d{2}-\d{2})\.xlsx$'
 # 天猫：{店铺名}_商品报表_{日期}.xls（生意参谋商品报表，表头位于第 5 行，含支付金额/支付买家数/商品访客数等 38 列）
 FILE_PATTERN_TMALL = r'^(.+)_商品报表_(\d{4}-\d{2}-\d{2})\.xls$'
 # 唯品会 JITX：{店铺名}JITX销售*销售数据.xlsx（单文件多日累积，含「日期」列，构建时按日拆分；店铺名含 JITX 后缀）

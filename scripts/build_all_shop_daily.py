@@ -17,6 +17,7 @@ FILE_RE  = re.compile(config.FILE_PATTERN)
 FILE_RE_PDD = re.compile(config.FILE_PATTERN_PDD)
 FILE_RE_JD_SELF = re.compile(config.FILE_PATTERN_JD_SELF)
 FILE_RE_JD_SELF_TRAFFIC = re.compile(config.FILE_PATTERN_JD_SELF_TRAFFIC)
+FILE_RE_JD_SELF_SHOPRANK = re.compile(config.FILE_PATTERN_JD_SELF_SHOPRANK)
 FILE_RE_JD_SELF_CITY = re.compile(config.FILE_PATTERN_JD_SELF_CITY)
 FILE_RE_TMALL = re.compile(config.FILE_PATTERN_TMALL)
 FILE_RE_VIP_JITX = re.compile(config.FILE_PATTERN_VIP_JITX)
@@ -345,6 +346,29 @@ def jdself_traffic_metrics(path, date):
                                  for _, s in g.iterrows()]}
     return result
 
+def jdself_shoprank_metrics(path, date):
+    """解析京东自营店铺排行表（商智店铺级日快照，访客去重口径，8 列），返回 {店铺名: 指标}。
+
+    用途：覆盖经营状况商品明细表（分 SKU 不去重）累加出的店铺级访客/成交人数等，
+    修正店铺转化率被低估的问题。时间列含「至」为窗口累计，返回 None 跳过。
+    无 SKU 明细，仅影响店铺行，SKU 层数据仍取流量/库存表。
+    """
+    df = pd.read_excel(path)
+    if len(df) == 0:
+        return {}
+    if "至" in str(df["时间"].iloc[0]):
+        return None  # 窗口累计，调用方跳过
+    for c in ["浏览量", "访客数", "成交人数", "成交单量", "成交商品件数", "成交金额"]:
+        df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
+    df["_shop"] = df["店铺名称"].fillna("未分配").astype(str).str.strip()
+    result = {}
+    for shop, g in df.groupby("_shop"):
+        result[shop] = {"gmv": float(g["成交金额"].sum()), "units": int(g["成交商品件数"].sum()),
+                        "orders": int(g["成交单量"].sum()), "buyers": int(g["成交人数"].sum()),
+                        "visitors": int(g["访客数"].sum()), "pv": int(g["浏览量"].sum()),
+                        "sourceFile": path.name}
+    return result
+
 def total_row(date, shop, row, count, source, platform='jd'):
     if platform == 'vip':
         return vip_total_row(date, shop, row, count, source)
@@ -492,7 +516,7 @@ def build(plat_only=None, force=False):
                 # 排除 Excel 锁文件 ~$xxx.xlsx；库存表 + 流量表双源
                 for f in sorted(pdir.glob("*.xlsx")):
                     if f.name.startswith("~$"): continue
-                    if FILE_RE_JD_SELF.match(f.name) or FILE_RE_JD_SELF_TRAFFIC.match(f.name) or FILE_RE_JD_SELF_CITY.match(f.name):
+                    if FILE_RE_JD_SELF.match(f.name) or FILE_RE_JD_SELF_TRAFFIC.match(f.name) or FILE_RE_JD_SELF_CITY.match(f.name) or FILE_RE_JD_SELF_SHOPRANK.match(f.name):
                         file_list.append((f, plat))
             else:
                 file_list.extend((f, plat) for f in sorted(pdir.glob("*.xlsx")) if FILE_RE.match(f.name))
@@ -545,6 +569,7 @@ def build(plat_only=None, force=False):
             m_inv = FILE_RE_JD_SELF.match(f.name)
             m_traf = FILE_RE_JD_SELF_TRAFFIC.match(f.name)
             m_city=FILE_RE_JD_SELF_CITY.match(f.name)
+            m_rank = FILE_RE_JD_SELF_SHOPRANK.match(f.name)
             if m_city:
                 d2=f"{m_city.group(1)[:4]}-{m_city.group(1)[4:6]}-{m_city.group(1)[6:]}"
                 jd_self_files.setdefault(d2,[]).append(("city", f))
@@ -552,6 +577,8 @@ def build(plat_only=None, force=False):
                 jd_self_files[m_inv.group(2)].append(("inventory", f))
             elif m_traf:
                 jd_self_files[m_traf.group(2)].append(("traffic", f))
+            elif m_rank:
+                jd_self_files[m_rank.group(2)].append(("rank", f))
             continue  # jd_self 稍后单独处理
         if plat == "pdd":
             m=FILE_RE_PDD.match(f.name)
@@ -635,7 +662,7 @@ def build(plat_only=None, force=False):
     # ── jd_self：按 (日期) 聚合库存表 + 经营状况表，合并为唯一一行 ──
     # city_stock 已在缓存载入阶段初始化；此处勿重复置空（否则命中缓存的平台数据被清掉）
     for date, entries in sorted(jd_self_files.items()):
-        inv={}; traf={}
+        inv={}; traf={}; rank={}
         for kind, f in entries:
             if kind == "city":
                 try:
@@ -650,6 +677,12 @@ def build(plat_only=None, force=False):
                     if cs: city_stock[date]=cs
                 except Exception as e:
                     print(f"⚠️  城市库存解析失败 {f.name}: {e}")
+            elif kind == "rank":
+                rk = jdself_shoprank_metrics(f, date)
+                if rk is None:
+                    q.setdefault("windowFiles", []).append({"date": date, "file": f.name})
+                    continue
+                rank = rk
             else:
                 tr = jdself_traffic_metrics(f, date)
                 if tr is None:
@@ -658,18 +691,22 @@ def build(plat_only=None, force=False):
                     continue
                 traf = tr
             q["parsedFiles"]+=1
-        all_shops = set(inv) | set(traf)
+        # 排行表店铺不在 inv/traf 时也应生成店铺行（如当日只有排行表导出）
+        all_shops = set(inv) | set(traf) | set(rank)
         for shop_name in sorted(all_shops):
             key=f"jd_self|{shop_name}"
             if key not in SHOP_META:
                 q["unexpectedShops"].append(f"jd_self:{shop_name}"); continue
-            i = inv.get(shop_name, {}); tr = traf.get(shop_name, {})
+            i = inv.get(shop_name, {}); tr = traf.get(shop_name, {}); rk = rank.get(shop_name, {})
+            # 零售口径优先级：店铺排行表（店铺级去重，转化率正确口径）> 经营状况明细累加。
+            # 仅覆盖店铺行 gmv/units/orders/buyers/visitors/pv；addCartUsers/skuCount 排行表无，仍取明细表
+            retail = rk if rk else tr
             x = {"date": date, "skuCount": tr.get("skuCount", i.get("skuCount", 0)),
-                 "sourceFile": (tr.get("sourceFile") or i.get("sourceFile") or ""),
-                 # 零售口径（经营状况表）：有则用，无则 0
-                 "gmv": float(tr.get("gmv", 0.0)), "units": int(tr.get("units", 0)),
-                 "orders": int(tr.get("orders", 0)), "buyers": int(tr.get("buyers", 0)),
-                 "visitors": int(tr.get("visitors", 0)), "pv": int(tr.get("pv", 0)),
+                 "sourceFile": (rk.get("sourceFile") or tr.get("sourceFile") or i.get("sourceFile") or ""),
+                 # 零售口径：有则用，无则 0
+                 "gmv": float(retail.get("gmv", 0.0)), "units": int(retail.get("units", 0)),
+                 "orders": int(retail.get("orders", 0)), "buyers": int(retail.get("buyers", 0)),
+                 "visitors": int(retail.get("visitors", 0)), "pv": int(retail.get("pv", 0)),
                  "addCartUsers": int(tr.get("addCartUsers", 0)),
                  # 供货口径（库存表）：有则用，无则 0
                  "gmvOutbound": float(i.get("gmvOutbound", 0.0)),
@@ -680,8 +717,8 @@ def build(plat_only=None, force=False):
                  # 框架其他字段补 0
                  "searchImpressions": 0, "searchClicks": 0,
                  "productImpressions": 0, "productImpressionUsers": 0,
-                 "orderAmount": float(tr.get("gmv", 0.0)), "orderCount": int(tr.get("orders", 0)),
-                 "orderBuyers": int(tr.get("buyers", 0)), "refundAmount": 0.0}
+                 "orderAmount": float(retail.get("gmv", 0.0)), "orderCount": int(retail.get("orders", 0)),
+                 "orderBuyers": int(retail.get("buyers", 0)), "refundAmount": 0.0}
             pairs.add((key,date))
             x["shopRaw"]=key; x["shopDisplay"]=shop_display(key)
             shop_rows[key].append(calc(x))
