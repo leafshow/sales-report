@@ -519,7 +519,8 @@ def build(plat_only=None, force=False):
                     if FILE_RE_JD_SELF.match(f.name) or FILE_RE_JD_SELF_TRAFFIC.match(f.name) or FILE_RE_JD_SELF_CITY.match(f.name) or FILE_RE_JD_SELF_SHOPRANK.match(f.name):
                         file_list.append((f, plat))
             else:
-                file_list.extend((f, plat) for f in sorted(pdir.glob("*.xlsx")) if FILE_RE.match(f.name))
+                file_list.extend((f, plat) for f in sorted(pdir.glob("*.xlsx"))
+                                 if FILE_RE.match(f.name) and not f.name.startswith("~$"))
         else:
             print(f"⚠️  平台 {plat} 数据目录不存在: {pdir}")
     file_list.sort(key=lambda x: x[0].name)
@@ -657,6 +658,18 @@ def build(plat_only=None, force=False):
             ok=abs(n(total["成交金额"])-sum(n(x) for x in detail["成交金额"]))<=max(.01,abs(n(total["成交金额"]))*.001)
             ok2=abs(n(total["成交商品件数"])-sum(n(x) for x in detail["成交商品件数"]))<=max(.01,abs(n(total["成交商品件数"]))*.001)
             q["reconciliationOk"] &= ok and ok2
+            # 赠品过滤：成交金额<0 的商品为赠品（随单附赠），除成交金额（负值冲抵退款/调整）与
+            # 访客数（明细合计不去重，店铺访客取源表总合计行去重值，故不参与过滤）外，
+            # 件数/人数/曝光等全部清零，避免虚增店铺正常经营指标；合计行对应字段按清零后明细重算
+            gift = pd.to_numeric(detail["成交金额"], errors="coerce").fillna(0) < 0
+            if gift.any():
+                zero_cols=[c for c in ("成交商品件数","成交单量","成交客户数","商品浏览量",
+                                       "搜索曝光次数","搜索点击次数","商品曝光次数","商品曝光人数",
+                                       "加购客户数","下单金额","下单单量","下单客户数","取消及售后退款金额")
+                           if c in detail.columns]
+                detail=detail.copy(); detail.loc[gift, zero_cols]=0
+                total=total.copy()
+                for c in zero_cols: total[c]=pd.to_numeric(detail[c], errors="coerce").fillna(0).sum()
             shop_rows[shop].append(total_row(date,shop,total,len(detail),f.name)); sku.setdefault(date,[]).extend(sku_rows(date,shop,detail))
 
     # ── jd_self：按 (日期) 聚合库存表 + 经营状况表，合并为唯一一行 ──
