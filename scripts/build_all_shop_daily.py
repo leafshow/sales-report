@@ -121,7 +121,8 @@ def tmall_parse_file(path, date):
     df = pd.read_excel(path, header=4)
     if len(df) == 0:
         return None, []
-    num = lambda c: pd.to_numeric(df[c], errors="coerce").fillna(0.0)
+    # 数值列可能是带千分位逗号的文本（如 "3,561.65"），先统一去逗号再转数值
+    num = lambda c: pd.to_numeric(df[c].astype(str).str.replace(",", "", regex=False), errors="coerce").fillna(0.0)
     cnt = lambda c: int(num(c).sum())
     gmv = float(num("支付金额").sum())
     x = {"date": date, "skuCount": int(df["商品ID"].nunique()), "sourceFile": path.name,
@@ -134,7 +135,7 @@ def tmall_parse_file(path, date):
          "orderBuyers": cnt("下单买家数"), "refundAmount": float(num("成功退款金额").sum())}
     row = calc(x)
     skus = []
-    num_s = lambda c: pd.to_numeric(s[c], errors="coerce")
+    num_s = lambda c: pd.to_numeric(str(s[c]).replace(",", ""), errors="coerce")
     for _, s in df.iterrows():
         sgmv = num_s("支付金额")
         sgmv = 0.0 if pd.isna(sgmv) else float(sgmv)
