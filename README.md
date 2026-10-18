@@ -44,6 +44,33 @@
 - 前端顶部「平台」切换器：**胶囊按钮组快速点击**（全平台 / 京东POP / 唯品会 / 拼多多 / 京东自营 等，当前项白底高亮），联动店铺列表、KPI 与图表。日期与店铺仍为下拉。
 - 数据目录已扁平化：`~/Desktop/Platform-Date/{JD,VIP,PDD,JD_SELF,...}/`（无 Import 子目录）。
 
+## SKU 类目人工改写
+
+部分商品在平台源表中的类目归属不准，可通过映射表强制覆盖（全平台生效，作用于 SKU 明细与类目聚合）。
+
+**文件链路**：桌面 CSV（运营编辑）→ `scripts/csv2category_json.py` 转换 → `scripts/category_override.json`（入库）→ 构建时扫描 JSON 改写类目。
+
+**操作步骤**：
+
+```bash
+# 1. 运营编辑桌面映射表（Excel 可直接打开 CSV，列：一级类目,二级类目,三级类目,SKU）
+#    路径：~/Desktop/Platform-Date/SKU_Info/category_override.csv
+
+# 2. 转换为 JSON（自动校验表头/空值/SKU 冲突并提示）
+python3 scripts/csv2category_json.py
+
+# 3. 提交 JSON 入库（git 可 diff，误改可回滚）
+git add scripts/category_override.json && git commit -m "chore: 更新SKU类目映射"
+
+# 4. 重建生效
+python3 scripts/build_all_shop_daily.py
+```
+
+**约定**：
+- 同一 SKU 在 CSV 中重复且类目不同时，后者覆盖前者，脚本会输出冲突清单
+- JSON 不存在或解析失败时构建仅告警跳过，不阻断
+- 已弃用 xlsx 格式（二进制无 diff、解析坑多），映射一律走 CSV
+
 ### 京东自营双口径
 
 京东自营有两类源文件，按 `(日期, 店铺)` 合并为唯一一行：

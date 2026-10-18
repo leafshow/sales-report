@@ -303,6 +303,8 @@ def jdself_inventory_metrics(path, date):
         skus = [{"_date": date, "sku": str(s["SKU"]), "name": t(s["商品名称"]), "shop": shop,
                  "category1": t(s["一级类目"]), "category2": t(s["二级类目"]), "category3": t(s["三级类目"]),
                  "gmv": float(s["_gmvOut"]), "gmvOutbound": float(s["_gmvOut"]), "units": int(s["_unitsOut"]), "orders": 0,
+                 "unitsOutbound": int(s["_unitsOut"]), "stockValue": float(s["_stockVal"]),
+                 "out30dValue": float(s["_out30Val"]), "outMtdValue": float(s["_outMtdVal"]), "orders": 0,
                  "buyers": 0, "visitors": 0, "searchImpressions": 0, "searchClicks": 0, "addCartUsers": 0,
                  "refundAmount": 0.0, "conversion": None, "uvValue": None}
                 for _, s in g.iterrows()]
@@ -742,7 +744,8 @@ def build(plat_only=None, force=False):
                 for sk in src:
                     sid=str(sk["sku"])
                     if sid in merged:
-                        merged[sid].update({k:v for k,v in sk.items() if v not in (0, 0.0, None)}) 
+                        merged[sid].update({k: v for k, v in sk.items()
+                                            if k not in ("units", "gmv") and v not in (0, 0.0, None)})
                     else:
                         merged[sid]=dict(sk)
             for sid, sk in merged.items():
@@ -797,6 +800,103 @@ def build(plat_only=None, force=False):
             q["sourceFiles"] += cq.get("sourceFiles", 0)
             q["emptyFiles"] += cq.get("emptyFiles", [])
         print(f"⚡ 增量模式：仅重新解析 [{plat_only}]，其余平台读缓存 {CACHE_DIR}")
+
+    # ── SKU 类目/店铺归属人工改写：scripts/category_override.json ──
+    #    源头为桌面 CSV（sku_override.csv，运营用 Excel 编辑），转换后入库；构建扫描 JSON 覆盖全平台明细。
+    #    结构（两段式，兼容旧扁平 {SKU:[c1,c2,c3]}）：{"category": {...}, "shop": {SKU: 目标店铺名}} ──
+    CAT_OVERRIDE_FILE = Path(__file__).resolve().parent / "category_override.json"
+    shop_key_map = {}  # SKU -> 划入店铺 key（city_stock 落库等阶段引用；JSON 不存在时为空）
+    if CAT_OVERRIDE_FILE.exists():
+        try:
+            _ov = json.load(open(CAT_OVERRIDE_FILE, encoding="utf-8"))
+            # 兼容旧扁平格式
+            cat_override = _ov.get("category", _ov if "shop" not in _ov and "category" not in _ov else {})
+            shop_override = _ov.get("shop", {})
+            # 店铺划转目标须已注册（同平台内划转）
+            shop_key_map = {}
+            for sku_id, tname in shop_override.items():
+                plats = {s.split("|", 1)[0] for s in SHOP_META}
+                cands = [f"{p}|{tname}" for p in plats if f"{p}|{tname}" in SHOP_META]
+                if not cands:
+                    print(f"⚠️  店铺划转目标未注册，忽略：SKU {sku_id} → {tname}")
+                    continue
+                shop_key_map[sku_id] = cands[0]
+            cat_hits = shop_hits = 0
+            xfer_skus = {}; xfer_src = {}  # (划入店,日期) -> 划入 SKU 集 / 来源店集
+            TRANSFER_FIELDS = ["gmv", "units", "orders", "buyers", "pv", "addCartUsers",
+                               "orderAmount", "orderCount", "orderBuyers", "refundAmount",
+                               "gmvOutbound", "unitsOutbound", "stockValue", "out30dValue", "outMtdValue"]
+            delta = {}  # (shopRaw, date) -> {field: delta}：划出店记负、划入店记正
+            for d, lst in sku.items():
+                for x in lst:
+                    k = str(x.get("sku", "")).strip()
+                    ov = cat_override.get(k)
+                    if ov:
+                        x["category1"], x["category2"], x["category3"] = ov[0], ov[1], ov[2]; cat_hits += 1
+                    tk = shop_key_map.get(k)
+                    if tk and x.get("shopRaw") != tk:
+                        src = x["shopRaw"]
+                        x["shopRaw"] = tk; x["shopDisplay"] = shop_display(tk); shop_hits += 1
+                        xfer_skus.setdefault((tk, x["date"]), set()).add(k)          # 划入店 SKU 清单
+                        xfer_src.setdefault((tk, x["date"]), set()).add(src)         # 划出来源店
+                        _city_xfer = shop_key_map                                # 供落库阶段 city_stock 改写引用
+                        for f in TRANSFER_FIELDS:
+                            v = x.get(f) or 0
+                            if v:
+                                delta.setdefault((src, x["date"]), {}).setdefault(f, 0.0)
+                                delta[(src, x["date"])][f] -= v
+                                delta.setdefault((tk, x["date"]), {}).setdefault(f, 0.0)
+                                delta[(tk, x["date"])][f] += v
+            print(f"🏷️  类目改写：{len(cat_override)} 个 SKU，命中 {cat_hits} 条明细行")
+            if shop_key_map:
+                print(f"🏪 店铺划转：{len(shop_key_map)} 个 SKU，命中 {shop_hits} 条明细行"
+                      f"（{', '.join(sorted({v.split('|',1)[1] for v in shop_key_map.values()}))}）")
+            # ── 店铺行修正：按 delta 调整划出/划入店铺行；访客为店铺级去重口径不可拆分 → 不划转 ──
+            moved_dates = {}
+            # 划入店补齐：访客取划出源店全店值（转化率口径=源店全店，按用户约定）；skuCount 取划入 SKU 数
+            for s, rows in shop_rows.items():
+                for r in rows:
+                    dd = delta.get((s, r["date"]))
+                    if not dd: continue
+                    for f, v in dd.items():
+                        r[f] = (r.get(f) or 0) + v
+                    calc(r)  # 重算转化率/客单价/UV价值等派生指标
+                    moved_dates.setdefault(s, set()).add(r["date"])
+            # 划入店（如虚拟新品类店）可能无既有店铺行 → 按 delta 补建
+            tk_shops = {v for v in shop_key_map.values()}
+            for (s, d), dd in delta.items():
+                if s in tk_shops and not any(r["date"] == d for r in shop_rows.get(s, [])):
+                    # 访客：取划出源店全店访客（转化率=源店全店口径，按约定）；skuCount=划入 SKU 数
+                    srcs = xfer_src.get((s, d), set())
+                    v_src = sum(next((r["visitors"] for r in shop_rows.get(src, []) if r["date"] == d), 0)
+                                for src in srcs) if srcs else 0
+                    x = {"date": d, "skuCount": len(xfer_skus.get((s, d), set())),
+                         "sourceFile": "virtual(划转)",
+                         "shopRaw": s, "shopDisplay": shop_display(s),
+                         "visitors": v_src, "pv": 0, "searchImpressions": 0, "searchClicks": 0,
+                         "productImpressions": 0, "productImpressionUsers": 0}
+                    for f in dd: x[f] = dd[f]
+                    for f in ("gmv","units","orders","buyers","pv","addCartUsers","orderAmount",
+                              "orderCount","orderBuyers","refundAmount","gmvOutbound","unitsOutbound",
+                              "stockValue","out30dValue","outMtdValue"):
+                        x.setdefault(f, 0)
+                    calc(x)
+                    # 转化率/UV价值直接沿用源店全店口径（按约定：访客与转化率均取原店全店值，不按划入数据重算）
+                    # 多源店时按源店访客加权平均（避免无数据源店把比率稀释为 0）
+                    _src_rows = [r for src in srcs for r in shop_rows.get(src, []) if r["date"] == d]
+                    _w = [r.get("visitors") or 0 for r in _src_rows]
+                    if _src_rows and sum(_w) > 0:
+                        x["conversion"] = sum((r.get("conversion") or 0) * w for r, w in zip(_src_rows, _w)) / sum(_w)
+                        x["uvValue"] = sum((r.get("uvValue") or 0) * w for r, w in zip(_src_rows, _w)) / sum(_w)
+                    elif _src_rows:
+                        x["conversion"] = sum(r.get("conversion") or 0 for r in _src_rows) / len(_src_rows)
+                        x["uvValue"] = sum(r.get("uvValue") or 0 for r in _src_rows) / len(_src_rows)
+                    shop_rows.setdefault(s, []).append(x)
+                    moved_dates.setdefault(s, set()).add(d)
+            for s, ds in sorted(moved_dates.items()):
+                print(f"   ↳ {SHOP_META[s][1]} 店铺行已修正/补建（{len(ds)} 天）")
+        except Exception as e:
+            print(f"⚠️  类目/店铺改写文件读取失败，跳过：{e}")
 
     dates=sorted({d for _,d in pairs})
     _pord={p:i for i,p in enumerate(PLATFORMS)}
@@ -1031,6 +1131,7 @@ def build(plat_only=None, force=False):
     return {"generatedAt":datetime.now().strftime("%Y-%m-%d %H:%M"),"sourceDir":"多平台导出（京东商智 + 唯品会 + 拼多多）",
             "shops":[{"raw":s,"display":shop_display(s),"brand":SHOP_META[s][1],"platform":shop_platform(s)} for s in shops],"platforms":PLATFORMS,"dates":dates,"overall":overall,
             "shopDaily":shop_rows,"categories":cats,"topSkus":tops,"movers":movers,"alerts":alerts,"quality":q,"charts":charts,"cityStock":city_stock,
+            "_shopOverride": shop_key_map,
             "optimization":optimization,
             "moduleFilters":config.MODULE_SHOPS_FILTER,
             "targets":{f"{k[0]}|{k[1]}":v for k,v in config.SHOP_TARGETS.items()}}
@@ -1144,12 +1245,15 @@ if __name__=="__main__":
                 gmv_val = r.get('gmv',0) if r.get('gmv') is not None else 0
                 refund = r.get('refundAmount',0) if r.get('refundAmount') is not None else 0
                 con.execute(f"INSERT INTO categories VALUES ('{date}', '{p_esc}', '{l1_esc}', '{l2_esc}', '{l3_esc}', {sqlnum(gmv_val) if gmv_val else 0}, {int(r.get('units',0) or 0)}, {int(r.get('orders',0) or 0)}, {int(r.get('skuCount',0) or 0)}, {visitors}, {refund if refund is not None else 0}, {sqlnum(r.get('gmvOutbound'))})")
-        # city_stock
+        # city_stock（划转 SKU 的城市库存行归属划入店——店铺划转口径）
+        _cx = data.get("_shopOverride") or {}
         for date, shops_cs in data.get("cityStock", {}).items():
             for shop, cs in shops_cs.items():
-                key=f"jd_self|{shop}"
-                if key not in SHOP_META: continue
                 for r in cs["rows"]:
+                    _sku = str(r["sku"]).strip()
+                    _tk = _cx.get(_sku)
+                    key = _tk if (_tk and _tk in SHOP_META) else f"jd_self|{shop}"
+                    if key not in SHOP_META: continue
                     name_esc=str(r["name"]).replace(chr(39), chr(92)+chr(39))
                     con.execute(f"INSERT INTO city_stock VALUES ('{date}', '{key}', '{r['sku']}', '{name_esc}', '{r['city']}', {r['stock']}, {r['dailyAvg']}, {r['daysCover'] if r['daysCover'] is not None else 'NULL'}, {r['outYesterday']}, {r['out7d']}, {r['natStock']}, {r['natDaysCover'] if r['natDaysCover'] is not None else 'NULL'}, {r['price']})")
 

@@ -1170,7 +1170,7 @@
         <section data-sec="shop-daily">
           <div class="head">
             <div>
-              <h2>店铺当日表现<span id="shopsec-title-shop" class="title-shop"></span></h2>
+              <h2>店铺销售表现<span id="shopsec-title-shop" class="title-shop"></span></h2>
               <div class="note">
                 贡献率为店铺GMV变化除以前日<span id="note-contrib"></span
                 >店铺GMV合计。
@@ -2196,7 +2196,7 @@
           }
         };
         function shops() {
-          /* 店铺当日表现标题随平台/店铺选择联动（与 X月店铺销售总览 同口径：前缀+span 后缀） */
+          /* 店铺销售表现标题随平台/店铺选择联动（与 X月店铺销售总览 同口径：前缀+span 后缀） */
           const st = document.getElementById("shopsec-title-shop");
           if (st) {
             const sh = DATA.shops.find((x) => x.raw === state.shop);
@@ -3113,7 +3113,7 @@
             });
             const a = document.createElement("a");
             a.download =
-              "店铺当日表现_" +
+              "店铺销售表现_" +
               (DATA.dates ? DATA.dates[DATA.dates.length - 1] : "") +
               ".png";
             a.href = canvas.toDataURL("image/png");
