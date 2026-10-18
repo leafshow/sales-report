@@ -1296,7 +1296,7 @@ if __name__=="__main__":
         pass  # DuckDB auto-commits
     finally:
         con.close()
-    latest=next(x for x in data["overall"] if x["date"]==data["quality"]["latestCompleteDate"])
+    latest=next(x for x in data["overall"] if x["date"]==data["quality"]["latestAvailableDate"])
     # 同步数据库到函数读取位置（api/report.duckdb，随 @vercel/python 打包）
     api_db = DB_PATH.parent.parent / "report.duckdb"
     if api_db != DB_PATH:
