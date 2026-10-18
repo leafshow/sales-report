@@ -653,6 +653,9 @@ def build(plat_only=None, force=False):
             totals={c: df[c].sum() for c in ("销售额","销售量","客户数","商详UV")}
             shop_rows[shop].append(vip_total_row(date,shop,totals,len(df),f.name)); sku.setdefault(date,[]).extend(vip_sku_rows(date,shop,df))
         else:
+            # 空报表（0 数据行，无合计行）：平台当日无销售时的正常形态，记 emptyFiles 跳过
+            if len(df)==0:
+                q.setdefault("emptyFiles", []).append({"shop": shop, "date": date, "file": f.name}); continue
             missing=[c for c in COLUMNS if c not in df.columns]
             if missing: raise RuntimeError(f"{f.name} missing {missing}")
             if len(df)<2 or t(df.iloc[0]["SKU"])!="合计": raise RuntimeError(f"{f.name} missing total row")

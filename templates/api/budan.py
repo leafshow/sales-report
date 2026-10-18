@@ -99,7 +99,8 @@ def handler():
         info = r.json()
         data = json.loads(base64.b64decode(info["content"]))
         # 覆盖更新：以本次填入数为该店铺该月的最新值
-        if amount is None:
+        # 0 元为无效值：等同于删除该条目（不写入 budan.json，也不产生 0 元提交记录）
+        if amount is None or amount == 0:
             data.get(shop, {}).pop(date, None)
             if shop in data and not data[shop]:
                 del data[shop]
