@@ -25,6 +25,13 @@ SHOPS    = config.SHOPS
 SHOP_META     = {f"{k[0]}|{k[1]}": v for k, v in config.SHOPS_VISIBLE.items()}   # 内部唯一 key = 平台|店铺名（仅可见店铺）
 SHOP_PLATFORM = {f"{k[0]}|{k[1]}": k[0] for k in SHOPS}
 HIDDEN_SHOPS  = config.HIDDEN_SHOPS   # 隐藏店铺：仍解析入库存数据，但不参与聚合与展示
+SHOP_START_DATES = config.SHOP_START_DATES  # 店铺数据起始日期：早于此的空报表不告警（开业前正常形态）
+def _record_empty(q, shop_key, shop_name, date, fname):
+    """记录空报表；店铺开业前（早于 shop_start_dates.json 起始日期）的空表为正常形态，不告警"""
+    sd = SHOP_START_DATES.get(shop_key, "")
+    if sd and date < sd:
+        return  # 开业前空表：静默跳过
+    q.setdefault("emptyFiles", []).append({"shop": shop_name, "date": date, "file": fname})
 PLATFORMS = config.PLATFORMS
 FIELDS   = config.FIELDS
 COLUMNS  = config.COLUMNS
@@ -594,7 +601,7 @@ def build(plat_only=None, force=False):
             date=m.group(2)
             row_p, skus_p = pdd_parse_file(f, date)
             if not row_p:
-                q.setdefault("emptyFiles", []).append({"shop": raw_shop, "date": date, "file": f.name}); continue
+                _record_empty(q, key, raw_shop, date, f.name); continue
             q["parsedFiles"]+=1
             pairs.add((key,date))
             row_p["shopRaw"]=key; row_p["shopDisplay"]=shop_display(key)
@@ -613,7 +620,7 @@ def build(plat_only=None, force=False):
             date=m.group(2)
             row_t, skus_t = tmall_parse_file(f, date)
             if not row_t:
-                q.setdefault("emptyFiles", []).append({"shop": raw_shop, "date": date, "file": f.name}); continue
+                _record_empty(q, key, raw_shop, date, f.name); continue
             q["parsedFiles"]+=1
             pairs.add((key,date))
             row_t["shopRaw"]=key; row_t["shopDisplay"]=shop_display(key)
@@ -648,14 +655,14 @@ def build(plat_only=None, force=False):
         if plat == 'vip':
             # 唯品会：无合计行，全部为明细行；指标取明细求和
             if len(df)==0:
-                q.setdefault("emptyFiles", []).append({"shop": shop, "date": date, "file": f.name}); continue
+                _record_empty(q, shop, shop, date, f.name); continue
             q["parsedFiles"]+=1; pairs.add((shop,date))
             totals={c: df[c].sum() for c in ("销售额","销售量","客户数","商详UV")}
             shop_rows[shop].append(vip_total_row(date,shop,totals,len(df),f.name)); sku.setdefault(date,[]).extend(vip_sku_rows(date,shop,df))
         else:
-            # 空报表（0 数据行，无合计行）：平台当日无销售时的正常形态，记 emptyFiles 跳过
+            # 空报表（0 数据行，无合计行）：店铺开业前或当日无销售，跳过（开业前不告警）
             if len(df)==0:
-                q.setdefault("emptyFiles", []).append({"shop": shop, "date": date, "file": f.name}); continue
+                _record_empty(q, shop, shop, date, f.name); continue
             missing=[c for c in COLUMNS if c not in df.columns]
             if missing: raise RuntimeError(f"{f.name} missing {missing}")
             if len(df)<2 or t(df.iloc[0]["SKU"])!="合计": raise RuntimeError(f"{f.name} missing total row")
@@ -994,7 +1001,8 @@ def build(plat_only=None, force=False):
     q.update({"expectedCombinations":len(shops)*len(dates),"actualCombinations":len(pairs),"shopCount":len(shops),"dateCount":len(dates),
               "emptyFiles":q.get("emptyFiles",[]),
               "completeDateCount":len(complete),"latestCompleteDate":complete[-1],"latestAvailableDate":dates[-1],
-              "missingCombinations":[{"shop":s,"date":d} for s in shops for d in dates if (s,d) not in pairs],
+              "missingCombinations":[{"shop":s,"date":d} for s in shops for d in dates
+                                    if (s,d) not in pairs and not (SHOP_START_DATES.get(s) and d < SHOP_START_DATES[s])],
               "expectedLatestDate":expected_latest,"missingDates":missing_dates,"isFresh":not missing_dates,
               "emptyFiles":q.get("emptyFiles",[])})
     # 空文件（如 VIP 导出 0 行）也算数据不全 → 追加到 missingDates 触发前端提醒

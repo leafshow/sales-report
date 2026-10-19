@@ -188,6 +188,24 @@ def _load_visibility():
         return set(), set()
 HIDDEN_SHOPS, HIDDEN_PLATFORMS = _load_visibility()
 
+# ── 店铺数据起始日期配置：scripts/shop_start_dates.json ──────────────────────
+#   {"startDates": {"jd|店铺名": "YYYY-MM-DD", ...}}
+#   早于起始日期的空报表 = 店铺开业前正常形态，不记 emptyFiles 告警（解析仍跳过）
+import json as _json2
+START_DATES_FILE = Path(os.environ.get(
+    'SHOP_START_DATES_FILE',
+    Path(__file__).parent / 'shop_start_dates.json'))
+def _load_start_dates():
+    try:
+        cfg = _json2.loads(START_DATES_FILE.read_text(encoding='utf-8'))
+        return dict(cfg.get('startDates', {}))
+    except FileNotFoundError:
+        return {}
+    except Exception as e:
+        print(f"⚠️  店铺起始日期配置解析失败（忽略）: {START_DATES_FILE}: {e}")
+        return {}
+SHOP_START_DATES = _load_start_dates()
+
 # 生效店铺列表 = SHOPS - 隐藏店铺 - 隐藏平台店铺（保持注册顺序）
 SHOPS_VISIBLE = {
     k: v for k, v in SHOPS.items()
