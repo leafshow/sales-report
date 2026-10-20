@@ -517,7 +517,8 @@ def build(plat_only=None, force=False):
             if plat == "pdd":
                 file_list.extend((f, plat) for f in sorted(pdir.glob("*.csv")) if FILE_RE_PDD.match(f.name))
             elif plat == "tmall":
-                file_list.extend((f, plat) for f in sorted(pdir.glob("*.xls")) if FILE_RE_TMALL.match(f.name))
+                file_list.extend((f, plat) for f in sorted(list(pdir.glob("*.xls")) + list(pdir.glob("*.xlsx")))
+                                 if FILE_RE_TMALL.match(f.name) and not f.name.startswith("~$"))
             elif plat == "vip_jitx":
                 # 唯品会 JITX：单文件多日累积报表（{店铺}JITX销售*销售数据.xlsx）
                 file_list.extend((f, plat) for f in sorted(pdir.glob("*.xlsx"))
