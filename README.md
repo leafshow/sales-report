@@ -192,7 +192,8 @@ git commit -m "report $(date +%m-%d)" && git push
 ### 本地预览
 
 ```bash
-cd templates && python3 server.py
+conda activate      #开启虚拟环境
+Python3 templates/server.py    #本地构建
 # 浏览器打开 http://127.0.0.1:8081（强刷 Cmd+Shift+R）
 # ⚠️ 不要直接双击 HTML，必须通过 http:// 访问
 ```

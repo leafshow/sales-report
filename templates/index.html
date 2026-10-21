@@ -477,6 +477,7 @@
       }
       .total-row {
         position: sticky;
+        top: 35px;
         background: linear-gradient(
           115deg,
           rgba(7, 34, 74, 0.06),
@@ -1069,6 +1070,7 @@
             <label for="shop">店铺</label
             ><select id="shop"></select>
             <button type="button" id="header-export" class="export-btn" title="导出：本月店铺销售总览 + 当日 SKU 表现">⬇ 导出日报图</button>
+            <button type="button" id="header-shop-export" class="export-btn" title="导出：店铺销售表现（标题 + 月度任务卡片 + 含合计行明细表）">⬇ 导出月报图</button>
           </div>
         </div>
         <div class="meta">
@@ -1178,7 +1180,9 @@
             </div>
             <button id="shoptable-export" class="export-btn">⬇ 导出图片</button>
           </div>
+          <div class="wrap" id="shop-mt-cards"></div>
           <div class="wrap"><table id="shoptable"></table></div>
+          <div class="wrap" id="shoptable-shot" hidden></div>
         </section>
         <section id="stocksec" hidden data-sec="stocksec">
           <div class="head">
@@ -2165,6 +2169,62 @@
           for (const shop in BUDAN) s += budanOf(shop, date);
           return s;
         }
+        /* 月度任务进度四卡片（月至今销售金额/月任务额/达成率/时间进度，含达成率 vs 时间进度进度条）：
+           X月店铺销售总览与店铺销售表现共用同一实现；shopsIn 为店铺 raw 键数组，ym 为 YYYY-MM */
+        function mtCardsHtml(shopsIn, ym) {
+          const tg = DATA.targets || {};
+          let target = 0,
+            has = false;
+          for (const r of shopsIn) {
+            const t = tg[r];
+            if (t && t[ym] != null) {
+              target += t[ym];
+              has = true;
+            }
+          }
+          const lastD =
+            [...DATA.dates].reverse().find((d) => d.slice(0, 7) === ym) ||
+            DATA.dates.at(-1);
+          const last = new Date(lastD + "T00:00:00");
+          const dim = new Date(
+            last.getFullYear(),
+            last.getMonth() + 1,
+            0,
+          ).getDate();
+          const prog = last.getDate() / dim;
+          let mtdSum = 0,
+            mtdHas = false,
+            budanSum = 0;
+          for (const r of shopsIn) {
+            const c = C(r, RD());
+            if (!c) continue;
+            const m = mtdSales(c, ym);
+            if (m != null) {
+              mtdSum += m;
+              mtdHas = true;
+            }
+            budanSum += budanMonth(r, ym); /* 当月各天补单合计 */
+          }
+          if (!has)
+            return `<div class="mt-row"><div class="mt-card"><div class="label">${ym} 月度任务</div><div class="value muted">未配置</div></div></div>`;
+          const rate = target > 0 && mtdHas ? (mtdSum - budanSum) / target : 0;
+          const col = (r2) =>
+            r2 >= prog
+              ? "#0f9960"
+              : r2 >= prog * 0.9
+                ? "#d9822b"
+                : "#cd4243";
+          const pct = (v) => Math.min(v * 100, 100).toFixed(1) + "%";
+          const bar = (v, c) =>
+            `<div class="mt-bar"><div class="fill" style="width:${pct(v)};background:${c}"></div></div>`;
+          const mtdNet = mtdHas ? mtdSum - budanSum : null; /* 扣减补单后的月至今净额 */
+          return `<div class="mt-row">
+                  <div class="mt-card"><div class="label">月至今销售金额</div><div class="value">${mtdNet != null ? M2(mtdNet) : "-"}</div><div class="sub">${ym} · 自营按出库口径${budanSum > 0 ? " · 已扣补单" : ""}</div></div>
+                  <div class="mt-card"><div class="label">月任务额</div><div class="value">${M2(target)}</div><div class="sub">${shopsIn.length} 店合计</div></div>
+                  <div class="mt-card"><div class="label">达成率</div><div class="value" style="color:${col(rate)}">${(rate * 100).toFixed(1)}%</div>${bar(rate, col(rate))}<div class="sub">进度线 ${(prog * 100).toFixed(1)}%</div></div>
+                  <div class="mt-card"><div class="label">时间进度</div><div class="value">${(prog * 100).toFixed(1)}%</div>${bar(prog, "#5c7080")}<div class="sub">${last.getDate()}/${dim} 天</div></div>
+                </div>`;
+        }
         /* 补单金额保存：POST /api/budan {shopRaw, date, amount}（本地直写 JSON；线上经 GitHub API 回传仓库触发重部署） */
         async function budanSave(shopRaw, date, amount) {
           const r = await fetch("/api/budan", {
@@ -2227,7 +2287,62 @@
             sv ? "<th>可用库存额</th>" : "",
             sv ? "<th>周转天数</th>" : "",
           ];
-          shoptable.innerHTML = `<thead><tr><th>店铺</th>${outCols.join("")}<th>GMV</th><th>占比</th><th>GMV环比</th><th>对整体贡献</th><th>访客数</th><th>访客环比</th><th>转化率</th><th>转化变化</th><th>客单价</th><th>UV价值</th><th>退款率</th></tr></thead><tbody>${cs
+          /* 表格上方月度任务进度四卡片：与 X月店铺销售总览同一实现 */
+          const mtEl = document.getElementById("shop-mt-cards");
+          if (mtEl)
+            mtEl.innerHTML = mtCardsHtml(
+              pairs.map((z) => z.s.raw),
+              (DATA.dates.at(-1) || state.date).slice(0, 7),
+            );
+          /* 合计行：金额/人数类求和；月至今/补单/达成率按当前筛选店铺集合聚合；比率列按合计值重算 */
+          const sum = (k) => cs.reduce((s, x) => s + (x[k] || 0), 0);
+          const sumGmv = sum("gmv"),
+            sumVis = sum("visitors"),
+            sumBuy = sum("buyers");
+          const ymCur = (DATA.dates.at(-1) || state.date).slice(0, 7);
+          let sumMtd = 0,
+            sumMtdHas = false,
+            sumBudan = 0,
+            sumTarget = 0,
+            tgtHas = false;
+          for (const z of pairs) {
+            const m = mtdSales(z.c, ymCur);
+            if (m != null) {
+              sumMtd += m;
+              sumMtdHas = true;
+            }
+            sumBudan += budanMonth(z.s.raw, ymCur);
+            const t = (DATA.targets || {})[z.s.raw];
+            if (t && t[ymCur] != null) {
+              sumTarget += t[ymCur];
+              tgtHas = true;
+            }
+          }
+          const sumRate =
+            sumTarget > 0 && sumMtdHas ? (sumMtd - sumBudan) / sumTarget : null;
+          const lastRow = pairs.length ? pairs[pairs.length - 1].c : null;
+          const sumStock = (() => {
+            let s = 0;
+            for (const c of cs)
+              if (c.shopRaw.indexOf("jd_self|") === 0 && c.stockValue != null)
+                s += c.stockValue;
+            return s;
+          })();
+          const sumOut30 = (() => {
+            let s = 0;
+            for (const c of cs)
+              if (c.shopRaw.indexOf("jd_self|") === 0)
+                s += c.out30dValue || 0;
+            return s;
+          })();
+          const totMtdTd = `<td>${sumMtdHas ? M2(sumMtd - sumBudan) : "-"}</td><td>${sumBudan > 0 ? M2(sumBudan) : "-"}</td><td>${sumRate != null ? `<span style="color:${sumRate >= 1 ? "#0f9960" : sumRate >= 0.9 ? "#d9822b" : "#cd4243"}">${(sumRate * 100).toFixed(1)}%</span>` : "-"}</td>`;
+          const totStockTd = sv
+            ? `<td>${sumStock > 0 ? M2(sumStock) : "-"}</td><td>${sumStock > 0 && sumOut30 > 0 ? (sumStock / (sumOut30 / 30)).toFixed(1) + " 天" : "-"}</td>`
+            : "";
+          const totOutTd = sv
+            ? `<td>${M2(sum("gmvOutbound"))}</td><td>${I(sum("unitsOutbound"))}</td>`
+            : "";
+          shoptable.innerHTML = `<thead><tr><th>店铺</th>${outCols.join("")}<th>GMV</th><th>占比</th><th>GMV环比</th><th>对整体贡献</th><th>访客数</th><th>访客环比</th><th>转化率</th><th>转化变化</th><th>客单价</th><th>UV价值</th><th>退款率</th></tr></thead><tbody><tr class="total-row"><td><strong>合计</strong></td>${totOutTd}${totMtdTd}${totStockTd}<td>${M2(sumGmv)}</td><td>${sumGmv > 0 ? P1(1) : "-"}</td><td>-</td><td>-</td><td>${I(sumVis)}</td><td>-</td><td>${sumBuy > 0 && sumVis > 0 ? P(sumBuy / sumVis) : "-"}</td><td>-</td><td>${sumBuy > 0 ? M2(sumGmv / sumBuy) : "-"}</td><td>${sumVis > 0 ? M2(sumGmv / sumVis) : "-"}</td><td>${sumGmv > 0 ? P(sum("refundAmount") / sumGmv) : "-"}</td></tr>${cs
             .map((c, i) => {
               const p = ps[i];
               const tdMtd = `<td>${(() => {
@@ -2255,6 +2370,12 @@
               return `<tr class="${state.shop === c.shopRaw ? "sel" : ""}"><td>${E(c.shopDisplay)}</td>${oc}<td>${hasT ? M2(c.gmv) : "-"}</td><td>${hasT ? P1(c.gmv / total) : "-"}</td><td>${hasT ? SP(ch(c.gmv, p.gmv)) : "-"}</td><td>${hasT && pt > 0 ? SP((c.gmv - p.gmv) / pt) : "-"}</td><td>${hasT ? I(c.visitors) : "-"}</td><td>${SP(ch(c.visitors, p.visitors))}</td><td>${P(c.conversion)}</td><td>${PP(df(c.conversion, p.conversion))}</td><td>${M2(c.aov)}</td><td>${M2(c.uvValue)}</td><td>${P(c.refundRate)}</td></tr>`;
             })
             .join("")}</tbody>`;
+          /* 合计行吸顶偏移 = 表头实测高度（top: 0 吸顶），确保滚动时合计行贴在表头正下方 */
+          requestAnimationFrame(() => {
+            const th0 = shoptable.querySelector("thead th");
+            const tr = shoptable.querySelector("tr.total-row");
+            if (th0 && tr) tr.style.top = th0.offsetHeight + "px";
+          });
         }
         function cats() {
           let rows = rangeDates().flatMap((d) => DATA.categories[d] || []);
@@ -2453,65 +2574,13 @@
               const sumOc = sv
                 ? `<td>${M2(S("gmvOutbound"))}</td><td>${I(S("unitsOutbound"))}</td>`
                 : "";
-              /* 月度任务进度：从明细表移出，渲染为表格上方一行四卡片（含达成率 vs 时间进度进度条） */
-              document.getElementById("month-target").innerHTML = (() => {
-                const ym = ymAll;
-                const tg = DATA.targets || {};
-                const shopsIn =
-                  state.shop === "ALL"
-                    ? platShops("shop_daily").map((x) => x.raw)
-                    : [state.shop];
-                let target = 0,
-                  has = false;
-                for (const r of shopsIn) {
-                  const t = tg[r];
-                  if (t && t[ym] != null) {
-                    target += t[ym];
-                    has = true;
-                  }
-                }
-                const last = sr.length
-                  ? new Date(sr[sr.length - 1].date + "T00:00:00")
-                  : new Date(DATA.dates.at(-1) + "T00:00:00");
-                const dim = new Date(
-                  last.getFullYear(),
-                  last.getMonth() + 1,
-                  0,
-                ).getDate();
-                const prog = last.getDate() / dim;
-                let mtdSum = 0,
-                  mtdHas = false,
-                  budanSum = 0;
-                for (const r of shopsIn) {
-                  const c = C(r, RD());
-                  if (!c) continue;
-                  const m = mtdSales(c, ym);
-                  if (m != null) {
-                    mtdSum += m;
-                    mtdHas = true;
-                  }
-                  budanSum += budanMonth(r, ym); /* 当月各天补单合计 */
-                }
-                if (!has)
-                  return `<div class="mt-row"><div class="mt-card"><div class="label">${ym} 月度任务</div><div class="value muted">未配置</div></div></div>`;
-                const rate = target > 0 && mtdHas ? (mtdSum - budanSum) / target : 0;
-                const col = (r2) =>
-                  r2 >= prog
-                    ? "#0f9960"
-                    : r2 >= prog * 0.9
-                      ? "#d9822b"
-                      : "#cd4243";
-                const pct = (v) => Math.min(v * 100, 100).toFixed(1) + "%";
-                const bar = (v, c) =>
-                  `<div class="mt-bar"><div class="fill" style="width:${pct(v)};background:${c}"></div></div>`;
-                const mtdNet = mtdHas ? mtdSum - budanSum : null; /* 扣减补单后的月至今净额 */
-                return `<div class="mt-row">
-                  <div class="mt-card"><div class="label">月至今销售金额</div><div class="value">${mtdNet != null ? M2(mtdNet) : "-"}</div><div class="sub">${ym} · 自营按出库口径${budanSum > 0 ? " · 已扣补单" : ""}</div></div>
-                  <div class="mt-card"><div class="label">月任务额</div><div class="value">${M2(target)}</div><div class="sub">${shopsIn.length} 店合计</div></div>
-                  <div class="mt-card"><div class="label">达成率</div><div class="value" style="color:${col(rate)}">${(rate * 100).toFixed(1)}%</div>${bar(rate, col(rate))}<div class="sub">进度线 ${(prog * 100).toFixed(1)}%</div></div>
-                  <div class="mt-card"><div class="label">时间进度</div><div class="value">${(prog * 100).toFixed(1)}%</div>${bar(prog, "#5c7080")}<div class="sub">${last.getDate()}/${dim} 天</div></div>
-                </div>`;
-              })();
+              /* 月度任务进度：从明细表移出，渲染为表格上方一行四卡片（与店铺销售表现共用 mtCardsHtml） */
+              document.getElementById("month-target").innerHTML = mtCardsHtml(
+                state.shop === "ALL"
+                  ? platShops("shop_daily").map((x) => x.raw)
+                  : [state.shop],
+                ymAll,
+              );
               const ymAll0 = ymAll;
               const budanMonthTotal = state.shop === "ALL"
                 ? platShops("shop_daily").reduce((s, x) => s + budanMonth(x.raw, ymAll0), 0)
@@ -3090,12 +3159,11 @@
       }
 
       (function () {
-        const btn = document.getElementById("shoptable-export");
-        if (!btn) return;
-        btn.onclick = async () => {
-          const wrap = btn.closest("section").querySelector(".wrap");
-          btn.disabled = true;
-          btn.textContent = "生成中…";
+        const exportShopShot = async function () {
+          const btn = this instanceof Element ? this : null;
+          const sec = document.querySelector('[data-sec="shop-daily"]');
+          const label = btn ? btn.textContent : "";
+          if (btn) { btn.textContent = "生成中…"; btn.disabled = true; }
           try {
             if (!window.html2canvas) {
               await new Promise((res, rej) => {
@@ -3107,10 +3175,27 @@
                 document.head.appendChild(sc);
               });
             }
-            const canvas = await html2canvas(wrap, {
+            /* 导出本模块完整内容：标题 + 月度任务四卡片 + 含合计行的明细表，纵向拼接为单张长图 */
+            const shot = document.getElementById("shoptable-shot");
+            shot.innerHTML = "";
+            shot.style.display = "flex";
+            shot.style.flexDirection = "column";
+            shot.style.gap = "12px";
+            shot.append(
+              sec.querySelector(".head > div").cloneNode(true),
+              document.getElementById("shop-mt-cards").cloneNode(true),
+              document.getElementById("shoptable").cloneNode(true),
+            );
+            /* 解除克隆内吸顶：html2canvas 按页面滚动位置绘制 sticky 元素会错位 */
+            shot.querySelectorAll("th, tr.total-row").forEach((el) => {
+              el.style.position = "static";
+              el.style.top = "auto";
+            });
+            const canvas = await html2canvas(shot, {
               backgroundColor: "#fff",
               scale: 2,
             });
+            shot.style.display = "none";
             const a = document.createElement("a");
             a.download =
               "店铺销售表现_" +
@@ -3121,15 +3206,17 @@
           } catch (e) {
             alert("导出失败：" + e.message);
           }
-          btn.disabled = false;
-          btn.textContent = "导出图片";
+          if (btn) { btn.disabled = false; btn.textContent = label || "导出图片"; }
         };
+        const secBtn = document.getElementById("shoptable-export");
+        if (secBtn) secBtn.onclick = exportShopShot;
+        const headerBtn = document.getElementById("header-shop-export");
+        if (headerBtn) headerBtn.onclick = exportShopShot;
       })();
       /* x月店铺销售总览：导出月度任务卡+分天明细表(+当日SKU表)为图片；标题栏「导出日报图」复用同一逻辑 */
       (function () {
         const exportDailyShot = async function () {
           const btn = this instanceof Element ? this : null;
-          /* 标题克隆固定取总览 section（header 按钮不在 section 内） */
           const sec = document.querySelector('[data-sec="month-target"]');
           const label = btn ? btn.textContent : "";
           if (btn) { btn.disabled = true; btn.textContent = "生成中…"; }
@@ -3144,18 +3231,21 @@
                 document.head.appendChild(sc);
               });
             }
-            /* 标题行（含月份+平台店铺名）+ 两个 .wrap（月度卡+明细表）克隆进临时纵向容器后截图 */
+            /* 标题行 + 模块内容克隆进临时纵向容器后截图。
+               标题行（含月份+平台店铺名）+ 两个 .wrap（月度卡+明细表）克隆进临时纵向容器后截图 */
             const shot = document.getElementById("dailysec-shot");
             shot.innerHTML = "";
             shot.style.display = "flex";
             shot.style.flexDirection = "column";
             shot.style.gap = "12px";
-            const headClone = sec.querySelector(".head > div").cloneNode(true);
-            shot.append(
-              headClone,
-              document.getElementById("month-target").cloneNode(true),
-              document.getElementById("daily-table").cloneNode(true),
-            );
+            {
+              const headClone = sec.querySelector(".head > div").cloneNode(true);
+              shot.append(
+                headClone,
+                document.getElementById("month-target").cloneNode(true),
+                document.getElementById("daily-table").cloneNode(true),
+              );
+            }
             /* 输入框替换为纯文本：html2canvas 渲染 input 易与文字重合，导出图只需数值。
                注意 M2 是 init() 内局部量，此处用 Number.toLocaleString 就地格式化 */
             shot.querySelectorAll("input[type='number']").forEach((inp) => {
