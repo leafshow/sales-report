@@ -106,6 +106,9 @@ def handler():
                 del data[shop]
         else:
             data.setdefault(shop, {})[date] = amount
+        # 数据与远端一致（如对不存在的条目提交 0 元）时不再产生空提交
+        if data == json.loads(base64.b64decode(info["content"])):
+            return _resp(200, {"ok": True, "data": data, "unchanged": True})
         payload = {
             "message": f"chore(budan): 更新补单金额 {shop} {date} -> {amount}",
             "content": base64.b64encode(
