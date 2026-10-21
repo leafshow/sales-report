@@ -2819,6 +2819,7 @@
             "武汉",
             "沈阳",
             "西安",
+            "德州",
           ];
           const bySku = {};
           rows.forEach((x) => {
@@ -2830,6 +2831,9 @@
               out7: x.out7d,
               nat: x.natStock,
               natD: x.natDaysCover,
+              natT: x.natTransit,
+              out: x.natOutYesterday ?? x.outYesterday,
+              out7: x.natOut7d ?? x.out7d,
               c: {},
             }).c[x.city] = x;
           });
@@ -2864,11 +2868,11 @@
               const nd = v.natD == null ? "-" : v.natD.toFixed(1);
               const wcls =
                 v.worst < 1 ? "critical" : v.worst < 3 ? "medium" : "";
-              return `<tr><td>${E(v.shop)}</td><td>${E(sku)}</td><td title="${E(v.name)}"><div class=name>${E(v.name)}</div></td><td>${v.price ? I(v.price) : "-"}</td><td>${I(v.out)}</td><td>${I(v.out7)}</td><td>${I(v.nat)}</td><td class=${wcls}>${nd}天</td>${tds}</tr>`;
+              return `<tr><td>${E(v.shop)}</td><td>${E(sku)}</td><td title="${E(v.name)}"><div class=name>${E(v.name)}</div></td><td>${v.price ? I(v.price) : "-"}</td><td>${I(v.out)}</td><td>${I(v.out7)}</td><td>${I(v.nat)}</td><td>${I(v.natT || 0)}</td><td class=${wcls}>${nd}天</td>${tds}</tr>`;
             })
             .join("");
           document.getElementById("citytable").innerHTML =
-            `<thead><tr><th>店铺</th><th>SKU</th><th>商品</th><th>采购价</th><th>昨出库</th><th>近7日出库</th><th>全国库存</th><th>全国覆盖</th>${th}</tr></thead><tbody>${trs}</tbody>`;
+            `<thead><tr><th>店铺</th><th>SKU</th><th>商品</th><th>采购价</th><th>昨出库</th><th>近7日出库</th><th>全国库存</th><th>采购在途</th><th>全国覆盖</th>${th}</tr></thead><tbody>${trs}</tbody>`;
         }
         function render() {
           renderRange();

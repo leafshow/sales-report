@@ -162,7 +162,7 @@ class Handler(SimpleHTTPRequestHandler):
             })
 
         city_stock = {}
-        for row in con.sql("SELECT date,shop,sku,name,city,stock,daily_avg,days_cover,out_yesterday,out_7d,nat_stock,nat_days_cover,price FROM city_stock ORDER BY date,shop,sku,city").fetchall():
+        for row in con.sql("SELECT date,shop,sku,name,city,stock,daily_avg,days_cover,out_yesterday,out_7d,nat_stock,nat_days_cover,price,nat_transit,nat_out_yesterday,nat_out_7d FROM city_stock ORDER BY date,shop,sku,city").fetchall():
             days=row[7]
             if days is None:
                 level="unknown"
@@ -177,7 +177,8 @@ class Handler(SimpleHTTPRequestHandler):
                 "sku": row[2], "name": row[3], "city": row[4],
                 "stock": row[5], "dailyAvg": row[6], "daysCover": days, "level": level,
                 "outYesterday": row[8], "out7d": row[9], "natStock": row[10],
-                "natDaysCover": row[11], "price": row[12]})
+                "natDaysCover": row[11], "price": row[12], "natTransit": row[13],
+                "natOutYesterday": row[14], "natOut7d": row[15]})
 
         movers = {}
         for row in con.sql("SELECT * FROM movers ORDER BY date").fetchall():

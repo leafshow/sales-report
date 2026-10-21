@@ -111,7 +111,7 @@ MODULE_SHOPS_FILTER = {
 #                "horizontal" = 横版宽表（默认横版-YYYYMMDD-*.xlsx，每城市一列，已废弃但保留适配）
 JD_CITY_SOURCE = os.environ.get('JD_CITY_SOURCE', 'vertical')
 # 主要 RDC 城市列表（城市库存预警范围）
-MAIN_CITIES = ['北京', '上海', '广州', '成都', '武汉', '沈阳', '西安']
+MAIN_CITIES = ['北京', '上海', '广州', '成都', '武汉', '沈阳', '西安', '德州']
 # 京东自营流量表（经营状况）：{供应商名}_经营状况商品明细_{日期}.xlsx（商智标准字段）
 FILE_PATTERN_JD_SELF_TRAFFIC = r'^(.+)_经营状况商品明细_(\d{4}-\d{2}-\d{2})\.xlsx$'
 # 京东自营店铺排行表（商智按日导出，店铺级去重口径，8 列）

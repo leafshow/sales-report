@@ -22,7 +22,7 @@
 | `index.html` | ~127KB | 轻量 HTML，运行时 fetch `/api/data` 加载数据 |
 | `api/data.py` | ~7KB | Flask 入口（`app`），读 DuckDB（read_only）返回 JSON |
 | `api/report.duckdb` | ~7.3MB | 函数打包读取的数据库副本（构建后自动同步） |
-| `api/data/report.duckdb` | ~7.3MB | 构建主输出（11 张表，含 city_stock 城市库存） |
+| `api/data/report.duckdb` | ~8.4MB | 构建主输出（11 张表，含 city_stock 城市库存） |
 
 > ⚠️ Vercel 文件系统只读，duckdb 必须 `connect(path, read_only=True)`；
 > ⚠️ 新版 Python runtime 只支持 Flask/ASGI `app` 入口，不再支持裸 `handler`。
@@ -104,11 +104,12 @@ python3 scripts/build_all_shop_daily.py
 
 ### 头部商品城市库存预警
 
-- **数据来源**：供应链库存表中的城市维度列（`{城市}现货库存`、`{城市}昨日出库商品件数` 等，~90 城市），取 7 个主要 RDC：北京 / 上海 / 广州 / 成都 / 武汉 / 沈阳 / 西安。注意城市列只覆盖部分主力仓，城市合计 ≠ 全国库存。
-- **范围**：近7日出库 TOP 20 SKU × 上述 7 城市（`HEAD_CITY_LIMIT` / `MAIN_CITIES`，位于 `build_all_shop_daily.py`）。
-- **落库**：DuckDB 表 `city_stock(date, shop, sku, name, city, stock, daily_avg, days_cover, out_yesterday, out_7d, nat_stock, nat_days_cover, price)`。
+- **数据来源**：供应链库存表纵版长表（每 SKU 一行 `RDC=全国` 全国合计 + N 行分仓明细，`RDC` 值剥离 FDC/配送中心/本地仓中心/城市/大商超/零售/补货B 等后缀后归一），取 8 个主要 RDC：北京 / 上海 / 广州 / 成都 / 武汉 / 沈阳 / 西安 / 德州（`MAIN_CITIES`）。注意城市列只覆盖部分主力仓，城市合计 ≠ 全国库存（全国值取 `RDC=全国` 行）。
+- **范围**：近7日出库 TOP 20 SKU × 上述 8 城市（`HEAD_CITY_LIMIT` / `MAIN_CITIES`，位于 `build_all_shop_daily.py`）；`是否售完即止=是` 的 SKU 在圈选前整行剔除，不进入本模块。
+- **落库**：DuckDB 表 `city_stock(date, shop, sku, name, city, stock, daily_avg, days_cover, out_yesterday, out_7d, nat_stock, nat_days_cover, nat_transit, nat_out_yesterday, nat_out_7d, price)`。
 - **预警分级**：`days_cover = 城市库存 ÷ SKU近7日日均出库`；<1 天 → 断货风险（红），1~3 天 → 偏低（黄），≥3 天 → 正常，无出库 → unknown。
-- **前端**：「头部商品城市库存预警」表格（仅京东自营视图可见）：一行一个 SKU，横向展示 7 城市库存/覆盖天数，附采购价、昨出库、近7日出库、全国库存与全国覆盖天数；按最差城市覆盖天数升序排列，风险格着色。
+- **全国口径**：`nat_stock` = `RDC=全国` 行现货库存件数；`nat_days_cover` = 全国库存 ÷ 全国行近7日日均出库；`nat_transit` = 全国行采购在途数量；`nat_out_yesterday` / `nat_out_7d` = 全国行昨日/近7日出库件数（无全国行的 SKU 以分仓合计兜底，该导出格式下两者一致）。
+- **前端**：「头部商品城市库存预警」表格（仅京东自营视图可见）：一行一个 SKU，横向展示 8 城市库存/覆盖天数，附采购价、昨出库、近7日出库（以上三项均为全国行口径）、全国库存、采购在途与全国覆盖天数；按最差城市覆盖天数升序排列，风险格着色。
 - **口径注意**：个别日期导出未勾选城市字段时该日数据缺失显示 —；头部 SKU 按全表昨日出库选取，落在无出库店铺分组的行 `days_cover` 为 null（unknown）。
 
 ### 拼多多指标映射
@@ -331,6 +332,8 @@ python3 -c "import duckdb; print('ok')"   # 能打印 ok 即可正常启动
 | 2026-10-19 | `b2bafcd` | **店铺数据起始日期配置：消除开业前空报表误报** | **背景**：新店铺开业前源目录即有空白导出文件，被误判为「数据缺失/空文件」告警，干扰下载故障识别<br>**方案**：新增 `scripts/shop_start_dates.json`（`{startDates: {"平台|店铺名": "YYYY-MM-DD"}}`，新店开业加一行即可）；`config.py` 加载（`SHOP_START_DATES_FILE` 环境变量可覆盖，容错同 shops_visibility）；构建端 `_record_empty()` 统一京东POP/自营、拼多多、天猫、唯品会四平台 emptyFiles 记录点，开业前空表静默跳过；`missingCombinations` 同步过滤<br>**效果**：某新店开业前 16 个空表全部过滤，开业后真实空表日照常提醒；README 新增配置章节 |
 | 2026-10-19 | `6ad45e9` | **新增拼多多店铺 + 本地预览排障文档** | **① 新店接入**：SHOPS 注册第 5 家拼多多店铺（序号 119），48 天全量入库（09-01~10-18，累计 GMV 8.6 万）；`pdd_parse_file` 对商智 60 列商品数据 CSV 通用，零代码改动；注意新店首次接入需 `-p pdd --force`（目录指纹未变时增量模式读旧缓存，新店文件会被当 unknown 跳过）<br>**② README 本地预览**：Python 环境自检（server.py 依赖 duckdb，系统/Xcode Python 3.9 无该依赖导致页面完全无数据——API 返回 `{"error": "duckdb not installed"}`）、四类常见故障排查表（duckdb 缺失/端口占用/浏览器缓存/file:// 直开）、curl 一条验证 API |
 | 2026-10-15 | `5f05469` | **首页模块顺序可配置 + 总览导出增强** | **① 模块顺序配置**：新增 `scripts/section_order.json`（`模块ID \| 中文名` 单数组格式，说明/对照/配置三合一）；模板 16 个 section 加 `data-sec` 标识，前端 `applySectionOrder` 按序重排；`.charts`（趋势图）/`.split`（涨跌SKU）同行网格组以容器为整体移动保持同行平分布局；文件缺失/损坏回退模板默认<br>**② 总览导出合并 SKU 表**：店铺销售总览「⬇ 导出图片」在月度四卡+分天明细表之后追加「当日 SKU 表现」标题+表格，单张 PNG 输出<br>**③ 标题栏快捷导出**：首页标题栏新增「⬇ 导出日报图」按钮，与总览区按钮复用同一导出函数（各自显示生成中状态），样式与标题栏日期选择按钮同风格（白透明底白字）<br>**④ 导出输入框转文本**：导出图中补单剔除输入框替换为纯文本金额（html2canvas 渲染 input 与文字重合）；就地用 `toLocaleString` 格式化（M2 为 init 内局部量，外层作用域不可见） |
+| 2026-10-20 | `8331fd4` | **店铺当日表现增强 + 店铺表现图导出** | **① 月度任务四卡共享**：`mtCardsHtml` 抽为共享函数（月至今销售金额/月任务额/达成率/时间进度），「店铺销售表现」表格上方复用与总览区同逻辑的四卡<br>**② 合计行前置**：「店铺销售表现」合计行移至表头下数据上（原在行尾），吸顶偏移按表头实测高度动态设置<br>**③ 导出店铺表现图**：店铺表现区新增「⬇ 导出店铺表现图」按钮，与标题栏「⬇ 导出日报图」相邻同风格，仅导出本模块完整内容（标题 + 月度任务四卡 + 含合计行的完整表格），克隆进隐藏容器解除 sticky 后 html2canvas 2x 输出 |
+| 2026-10-21 | — | **城市库存预警：德州列 + 采购在途 + 全国口径修正 + 售止过滤** | **① 德州列**：`MAIN_CITIES` 与前端 `CITIES` 同步追加德州，城市矩阵 7 → 8 列<br>**② 采购在途列**：前端「全国库存」后新增，取源表 `RDC=全国` 行 `采购在途数量`（`city_stock.nat_transit`）<br>**③ 全国口径修正**：`nat_stock` 原为「城市现货 × 采购价」的错位值且逐行不同，现取 `RDC=全国` 行现货件数；新增 `nat_days_cover`（全国库存 ÷ 全国行近7日日均出库）、`nat_out_yesterday` / `nat_out_7d`（昨出库/近7日出库 SKU 级列原误取城市行数据，如上海 9/19，现取全国行 231/683）；无全国行 SKU 以分仓合计兜底<br>**④ 售完即止过滤**：`是否售完即止=是` 的 SKU 在 TOP20 圈选前整行剔除，纵版/横版解析双路径同步生效<br>**⑤ 落库/API**：`city_stock` 表 13 → 16 列（新增 nat_transit / nat_out_yesterday / nat_out_7d），`server.py` 与 `api/data.py` 双入口同步透出 `natTransit` / `natOutYesterday` / `natOut7d` |
 
 ---
 

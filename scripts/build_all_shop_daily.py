@@ -185,6 +185,8 @@ def jdself_city_stock(path, date):
     out_col="全国昨日出库商品件数" if "全国昨日出库商品件数" in head.columns else "昨日出库商品件数"
     w7_col="全国近7日出库商品件数" if "全国近7日出库商品件数" in head.columns else "近7日出库商品件数"
     need=["SKU","商品名称","店铺名称","全国采购价",out_col,w7_col]+list(stock_cols.values())
+    if "是否售完即止" in head.columns:
+        need.append("是否售完即止")
     df=pd.read_excel(path, usecols=[c for c in need if c in head.columns])
     if len(df)==0 or out_col not in df.columns:
         return {}
@@ -192,6 +194,9 @@ def jdself_city_stock(path, date):
         if c not in ("SKU","商品名称","店铺名称"):
             df[c]=pd.to_numeric(df[c], errors="coerce").fillna(0.0)
     df["_shop"]=df["店铺名称"].fillna("未分配").astype(str).str.strip()
+    if "是否售完即止" in df.columns:
+        df = df[df["是否售完即止"].astype(str).str.strip() != "是"]
+        if len(df)==0: return {}
     result={}
     for shop,g in df.groupby("_shop"):
         top=g.nlargest(HEAD_CITY_LIMIT,out_col)
@@ -220,13 +225,26 @@ def jdself_city_stock_vertical(path, date):
     返回与横版 jdself_city_stock 相同结构：{店铺名: {gmvOutbound,unitsOutbound,stockValue,out30dValue,rows:[...]}}。
     """
     df = pd.read_excel(path, usecols=lambda c: c in ("SKU","商品名称","店铺名称","RDC","现货库存",
-                                                      "昨日出库商品件数","近7日出库商品件数","全国采购价"))
+                                                      "昨日出库商品件数","近7日出库商品件数","全国采购价","是否售完即止",
+                                                      "采购在途数量"))
     need={"SKU","商品名称","店铺名称","RDC","现货库存","昨日出库商品件数","全国采购价"}
     if not need <= set(df.columns) or len(df)==0:
         return {}
     for c in ("现货库存","昨日出库商品件数","近7日出库商品件数","全国采购价"):
         if c in df.columns: df[c]=pd.to_numeric(df[c],errors="coerce").fillna(0.0)
     if "近7日出库商品件数" not in df.columns: df["近7日出库商品件数"]=0.0
+    if "采购在途数量" in df.columns:
+        df["采购在途数量"]=pd.to_numeric(df["采购在途数量"],errors="coerce").fillna(0.0)
+    # 售完即止商品不再补货，无预警意义，进入任何统计前整行剔除
+    if "是否售完即止" in df.columns:
+        df = df[df["是否售完即止"].astype(str).str.strip() != "是"]
+        if len(df) == 0: return {}
+    # RDC=全国 行是全国合计口径（现货=全国现货库存件数），仅用于全国库存/覆盖；分仓行用于城市格
+    nat_cols = ["现货库存", "近7日出库商品件数", "昨日出库商品件数"] + (["采购在途数量"] if "采购在途数量" in df.columns else [])
+    nat = df[df["RDC"].astype(str).str.strip() == "全国"].groupby("SKU")[nat_cols].sum()
+    # 无全国行的 SKU：全国=分仓合计，用全部行合计兜底
+    nat = nat.combine_first(df.groupby("SKU")[nat_cols].sum())
+    nat.index = nat.index.astype(str)
     def norm_city(v):
         v=str(v).strip()
         if not v or v in ("全国","无","nan"): return None
@@ -236,8 +254,6 @@ def jdself_city_stock_vertical(path, date):
     df["_city"]=df["RDC"].map(norm_city)
     df=df[df["_city"].notna()]
     if len(df)==0: return {}
-    df["_gmvOut"]=df["全国采购价"]*df["昨日出库商品件数"]
-    df["_stockVal"]=df["全国采购价"]*df["现货库存"]
     result={}
     for shop,g in df.groupby("店铺名称"):
         g=g.copy()
@@ -250,12 +266,20 @@ def jdself_city_stock_vertical(path, date):
             sku=str(sku)
             stock=float(r["现货库存"].sum()); out7=float(r["近7日出库商品件数"].sum())
             avg7=out7/7.0
+            nat_stock=float(nat.loc[sku, "现货库存"]) if sku in nat.index else 0.0
+            nat_avg7=float(nat.loc[sku, "近7日出库商品件数"])/7.0 if sku in nat.index else 0.0
+            nat_transit=float(nat.loc[sku, "采购在途数量"]) if sku in nat.index and "采购在途数量" in nat.columns else 0.0
+            nat_out_d=float(nat.loc[sku, "昨日出库商品件数"]) if sku in nat.index else 0.0
+            nat_out7=float(nat.loc[sku, "近7日出库商品件数"]) if sku in nat.index else 0.0
             rows.append({"sku":sku,"name":t(name_map.get(sku,"")),"city":city,
                          "stock":stock,"dailyAvg":round(avg7,1),
                          "daysCover":round(stock/avg7,1) if avg7>0 else None,
                          "outYesterday":float(r["昨日出库商品件数"].sum()),
                          "out7d":out7,
-                         "natStock":float(r["_stockVal"].sum()),"natDaysCover":None,"price":float(r["全国采购价"].iloc[0])})
+                         "natStock":nat_stock,"natDaysCover":round(nat_stock/nat_avg7,1) if nat_avg7>0 else None,
+                         "natTransit":nat_transit,
+                         "natOutYesterday":nat_out_d,"natOut7d":nat_out7,
+                         "price":float(r["全国采购价"].iloc[0])})
         if rows: result[shop]={"rows":rows}
     return result
 
@@ -1198,7 +1222,7 @@ if __name__=="__main__":
         con.execute("CREATE TABLE overall (date VARCHAR PRIMARY KEY, shop_count BIGINT, sku_count BIGINT, gmv DOUBLE, units BIGINT, orders BIGINT, buyers BIGINT, visitors BIGINT, conversion DOUBLE, aov DOUBLE, uv_value DOUBLE, add_cart_users BIGINT, refund_amount DOUBLE, refund_rate DOUBLE, baseline VARCHAR, week VARCHAR)")
         con.execute("CREATE TABLE shop_daily (date VARCHAR, shop VARCHAR, sku_count BIGINT, gmv DOUBLE, units BIGINT, orders BIGINT, buyers BIGINT, visitors BIGINT, conversion DOUBLE, aov DOUBLE, uv_value DOUBLE, refund_amount DOUBLE, refund_rate DOUBLE, baseline VARCHAR, week VARCHAR, gmv_outbound DOUBLE, units_outbound BIGINT, stock_value DOUBLE, out30d_value DOUBLE, out_mtd_value DOUBLE, PRIMARY KEY(date, shop))")
         con.execute("CREATE TABLE categories (date VARCHAR, path VARCHAR, l1 VARCHAR, l2 VARCHAR, l3 VARCHAR, gmv DOUBLE, units BIGINT, orders BIGINT, sku_count BIGINT, visitors BIGINT, refund_amount DOUBLE, gmv_outbound DOUBLE)")
-        con.execute("CREATE TABLE city_stock (date VARCHAR, shop VARCHAR, sku VARCHAR, name VARCHAR, city VARCHAR, stock DOUBLE, daily_avg DOUBLE, days_cover DOUBLE, out_yesterday DOUBLE, out_7d DOUBLE, nat_stock DOUBLE, nat_days_cover DOUBLE, price DOUBLE)")
+        con.execute("CREATE TABLE city_stock (date VARCHAR, shop VARCHAR, sku VARCHAR, name VARCHAR, city VARCHAR, stock DOUBLE, daily_avg DOUBLE, days_cover DOUBLE, out_yesterday DOUBLE, out_7d DOUBLE, nat_stock DOUBLE, nat_days_cover DOUBLE, nat_transit DOUBLE, nat_out_yesterday DOUBLE, nat_out_7d DOUBLE, price DOUBLE)")
         con.execute("CREATE TABLE top_skus (date VARCHAR, shop VARCHAR, sku VARCHAR, name VARCHAR, gmv DOUBLE, units BIGINT, visitors BIGINT, conversion DOUBLE, uv_value DOUBLE, refund_amount DOUBLE, gmv_outbound DOUBLE)")
         con.execute("CREATE TABLE movers (date VARCHAR, type VARCHAR, shop VARCHAR, sku VARCHAR, name VARCHAR, previous_gmv DOUBLE, gmv DOUBLE, delta DOUBLE)")
         con.execute("CREATE TABLE alerts (date VARCHAR, level VARCHAR, scope VARCHAR, type VARCHAR, detail VARCHAR, current DOUBLE, previous DOUBLE, change DOUBLE)")
@@ -1267,7 +1291,7 @@ if __name__=="__main__":
                     key = _tk if (_tk and _tk in SHOP_META) else f"jd_self|{shop}"
                     if key not in SHOP_META: continue
                     name_esc=str(r["name"]).replace(chr(39), chr(92)+chr(39))
-                    con.execute(f"INSERT INTO city_stock VALUES ('{date}', '{key}', '{r['sku']}', '{name_esc}', '{r['city']}', {r['stock']}, {r['dailyAvg']}, {r['daysCover'] if r['daysCover'] is not None else 'NULL'}, {r['outYesterday']}, {r['out7d']}, {r['natStock']}, {r['natDaysCover'] if r['natDaysCover'] is not None else 'NULL'}, {r['price']})")
+                    con.execute(f"INSERT INTO city_stock VALUES ('{date}', '{key}', '{r['sku']}', '{name_esc}', '{r['city']}', {r['stock']}, {r['dailyAvg']}, {r['daysCover'] if r['daysCover'] is not None else 'NULL'}, {r['outYesterday']}, {r['out7d']}, {r['natStock']}, {r['natDaysCover'] if r['natDaysCover'] is not None else 'NULL'}, {r.get('natTransit', 0)}, {r.get('natOutYesterday', 0)}, {r.get('natOut7d', 0)}, {r['price']})")
 
         # top_skus
         for date, rows in data["topSkus"].items():
