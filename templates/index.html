@@ -66,6 +66,11 @@
         color: rgba(255, 255, 255, 0.83);
         max-width: 900px;
       }
+      /* 页面级 .sub 是页头副标题（深底白字）；表格小计行借用 sub 类名会继承白色，此处强制回正 */
+      tr.sub,
+      tr.sub td {
+        color: var(--ink, #162233);
+      }
       .controls {
         display: flex;
         gap: 10px;
@@ -487,6 +492,23 @@
       }
       .total-row td {
         border-bottom: 2px solid var(--accent, #1251b7);
+      }
+      .total-row.sub {
+        background: #f5f7fb;
+        font-weight: 550;
+      }
+      .total-row.sub td {
+        border-bottom: 1px solid var(--line, #dfe6ef);
+      }
+      .group-head td {
+        position: sticky;
+        background: #e8eefb;
+        color: #33507d;
+        font-weight: 650;
+        font-size: 12px;
+        padding: 7px 10px;
+        letter-spacing: 0.5px;
+        border-bottom: 1px solid var(--line, #dfe6ef);
       }
       th {
         position: sticky;
@@ -2342,9 +2364,79 @@
           const totOutTd = sv
             ? `<td>${M2(sum("gmvOutbound"))}</td><td>${I(sum("unitsOutbound"))}</td>`
             : "";
-          shoptable.innerHTML = `<thead><tr><th>店铺</th>${outCols.join("")}<th>GMV</th><th>占比</th><th>GMV环比</th><th>对整体贡献</th><th>访客数</th><th>访客环比</th><th>转化率</th><th>转化变化</th><th>客单价</th><th>UV价值</th><th>退款率</th></tr></thead><tbody><tr class="total-row"><td><strong>合计</strong></td>${totOutTd}${totMtdTd}${totStockTd}<td>${M2(sumGmv)}</td><td>${sumGmv > 0 ? P1(1) : "-"}</td><td>-</td><td>-</td><td>${I(sumVis)}</td><td>-</td><td>${sumBuy > 0 && sumVis > 0 ? P(sumBuy / sumVis) : "-"}</td><td>-</td><td>${sumBuy > 0 ? M2(sumGmv / sumBuy) : "-"}</td><td>${sumVis > 0 ? M2(sumGmv / sumVis) : "-"}</td><td>${sumGmv > 0 ? P(sum("refundAmount") / sumGmv) : "-"}</td></tr>${cs
-            .map((c, i) => {
-              const p = ps[i];
+          /* 分组合计：全平台视图拆 京东自营 / 非京东自营 两组，组头行分隔；其余视图单组合计 */
+          const isGrouped = state.shop === "ALL" && state.platform === "ALL";
+          const aggGroup = (list) => {
+            const g = list.map((z) => z.c);
+            const s = (k) => g.reduce((a, x) => a + (x[k] || 0), 0);
+            let mtd = 0,
+              mtdHas = false,
+              bd = 0,
+              tgt = 0,
+              tHas = false;
+            for (const z of list) {
+              const m = mtdSales(z.c, ymCur);
+              if (m != null) {
+                mtd += m;
+                mtdHas = true;
+              }
+              bd += budanMonth(z.s.raw, ymCur);
+              const t = (DATA.targets || {})[z.s.raw];
+              if (t && t[ymCur] != null) {
+                tgt += t[ymCur];
+                tHas = true;
+              }
+            }
+            let stock = 0,
+              out30 = 0;
+            for (const c of g)
+              if (c.shopRaw.indexOf("jd_self|") === 0) {
+                if (c.stockValue != null) stock += c.stockValue;
+                out30 += c.out30dValue || 0;
+              }
+            return {
+              g,
+              s,
+              gmv: s("gmv"),
+              vis: s("visitors"),
+              buy: s("buyers"),
+              mtd,
+              mtdHas,
+              bd,
+              tgt,
+              tHas,
+              rate: tgt > 0 && mtdHas ? (mtd - bd) / tgt : null,
+              stock,
+              out30,
+            };
+          };
+          const gSelf = isGrouped ? pairs.filter((z) => z.s.raw.indexOf("jd_self|") === 0) : [];
+          const gOther = isGrouped ? pairs.filter((z) => z.s.raw.indexOf("jd_self|") !== 0) : [];
+          const A = isGrouped ? aggGroup(gSelf) : null;
+          const B = isGrouped ? aggGroup(gOther) : null;
+          const rateCell = (r) =>
+            r != null
+              ? `<span style="color:${r >= 1 ? "#0f9960" : r >= 0.9 ? "#d9822b" : "#cd4243"}">${(r * 100).toFixed(1)}%</span>`
+              : "-";
+          const subTotalRow = (label, k) => {
+            const K = k === "self" ? A : B;
+            const outTd = sv
+              ? `<td>${K.s("gmvOutbound") > 0 ? M2(K.s("gmvOutbound")) : "-"}</td><td>${K.s("unitsOutbound") > 0 ? I(K.s("unitsOutbound")) : "-"}</td>`
+              : "";
+            const mtdTd = `<td>${K.mtdHas ? M2(K.mtd - K.bd) : "-"}</td><td>${K.bd > 0 ? M2(K.bd) : "-"}</td><td>${rateCell(K.rate)}</td>`;
+            const stockTd = sv
+              ? `<td>${K.stock > 0 ? M2(K.stock) : "-"}</td><td>${K.stock > 0 && K.out30 > 0 ? (K.stock / (K.out30 / 30)).toFixed(1) + " 天" : "-"}</td>`
+              : "";
+            return `<tr class="total-row sub" data-group="${k}"><td>${label}</td>${outTd}${mtdTd}${stockTd}<td>${M2(K.gmv)}</td><td>-</td><td>-</td><td>-</td><td>${I(K.vis)}</td><td>-</td><td>${K.buy > 0 && K.vis > 0 ? P(K.buy / K.vis) : "-"}</td><td>-</td><td>${K.buy > 0 ? M2(K.gmv / K.buy) : "-"}</td><td>${K.vis > 0 ? M2(K.gmv / K.vis) : "-"}</td><td>${K.gmv > 0 ? P(K.s("refundAmount") / K.gmv) : "-"}</td></tr>`;
+          };
+          const totalRowHtml =
+            `<tr class="total-row"><td><strong>合计</strong></td>${totOutTd}${totMtdTd}${totStockTd}<td>${M2(sumGmv)}</td><td>${sumGmv > 0 ? P1(1) : "-"}</td><td>-</td><td>-</td><td>${I(sumVis)}</td><td>-</td><td>${sumBuy > 0 && sumVis > 0 ? P(sumBuy / sumVis) : "-"}</td><td>-</td><td>${sumBuy > 0 ? M2(sumGmv / sumBuy) : "-"}</td><td>${sumVis > 0 ? M2(sumGmv / sumVis) : "-"}</td><td>${sumGmv > 0 ? P(sum("refundAmount") / sumGmv) : "-"}</td></tr>`;
+          const totalRows = isGrouped
+            ? totalRowHtml + subTotalRow("├ 京东自营", "self") + subTotalRow("└ 非京东自营", "other")
+            : totalRowHtml;
+          const groupHead = (label) =>
+            `<tr class="group-head"><td colspan="${13 + outCols.filter(Boolean).length}">${label}</td></tr>`;
+          const rowHtml = (c, p) => {
               const tdMtd = `<td>${(() => {
                     const m = mtdSales(c);
                     return m != null ? M2(m - budanMonth(c.shopRaw, (DATA.dates.at(-1) || "").slice(0, 7))) : "-";
@@ -2368,13 +2460,39 @@
                   : "");
               const hasT = (c.gmv || 0) > 0 || (c.visitors || 0) > 0;
               return `<tr class="${state.shop === c.shopRaw ? "sel" : ""}"><td>${E(c.shopDisplay)}</td>${oc}<td>${hasT ? M2(c.gmv) : "-"}</td><td>${hasT ? P1(c.gmv / total) : "-"}</td><td>${hasT ? SP(ch(c.gmv, p.gmv)) : "-"}</td><td>${hasT && pt > 0 ? SP((c.gmv - p.gmv) / pt) : "-"}</td><td>${hasT ? I(c.visitors) : "-"}</td><td>${SP(ch(c.visitors, p.visitors))}</td><td>${P(c.conversion)}</td><td>${PP(df(c.conversion, p.conversion))}</td><td>${M2(c.aov)}</td><td>${M2(c.uvValue)}</td><td>${P(c.refundRate)}</td></tr>`;
-            })
-            .join("")}</tbody>`;
+            };
+          const bodyRows = isGrouped
+            ? groupHead("京东自营（" + gSelf.length + " 店）") +
+              cs
+                .map((c, i) => ({ c, i }))
+                .filter(({ c }) => c.shopRaw.indexOf("jd_self|") === 0)
+                .map(({ c, i }) => rowHtml(c, ps[i]))
+                .join("") +
+              groupHead("非京东自营（" + gOther.length + " 店）") +
+              cs
+                .map((c, i) => ({ c, i }))
+                .filter(({ c }) => c.shopRaw.indexOf("jd_self|") !== 0)
+                .map(({ c, i }) => rowHtml(c, ps[i]))
+                .join("")
+            : cs.map((c, i) => rowHtml(c, ps[i])).join("");
+          shoptable.innerHTML =
+            `<thead><tr><th>店铺</th>${outCols.join("")}<th>GMV</th><th>占比</th><th>GMV环比</th><th>对整体贡献</th><th>访客数</th><th>访客环比</th><th>转化率</th><th>转化变化</th><th>客单价</th><th>UV价值</th><th>退款率</th></tr></thead><tbody>${totalRows}${bodyRows}</tbody>`;
           /* 合计行吸顶偏移 = 表头实测高度（top: 0 吸顶），确保滚动时合计行贴在表头正下方 */
           requestAnimationFrame(() => {
             const th0 = shoptable.querySelector("thead th");
-            const tr = shoptable.querySelector("tr.total-row");
-            if (th0 && tr) tr.style.top = th0.offsetHeight + "px";
+            const rows = shoptable.querySelectorAll("tr.total-row");
+            const thH = th0 ? th0.offsetHeight : 35;
+            rows.forEach((tr) => {
+              const prev = tr.previousElementSibling;
+              let top = thH;
+              while (prev && prev.classList.contains("total-row")) {
+                top += prev.offsetHeight;
+                do {
+                  prev = prev.previousElementSibling;
+                } while (prev && !prev.classList.contains("total-row"));
+              }
+              tr.style.top = top + "px";
+            });
           });
         }
         function cats() {
