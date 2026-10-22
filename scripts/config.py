@@ -120,7 +120,7 @@ FILE_PATTERN_JD_SELF_SHOPRANK = r'^(.+)_店铺排行_(\d{4}-\d{2}-\d{2})\.xlsx$'
 # 平台导出格式可能切换，两种后缀均兼容；同一日期两种后缀并存时优先 xlsx（glob 按序，后者覆盖前者））
 FILE_PATTERN_TMALL = r'^(.+)_商品报表_(\d{4}-\d{2}-\d{2})\.(?:xls|xlsx)$'
 # 唯品会 JITX：{店铺名}JITX销售*销售数据.xlsx（单文件多日累积，含「日期」列，构建时按日拆分；店铺名含 JITX 后缀）
-FILE_PATTERN_VIP_JITX = r'^((?:\S+?)JITX)销售\S*销售数据\.xlsx$'
+FILE_PATTERN_VIP_JITX = r'^((?:\S+?)JITX)销售\S*?\s*销售数据\.xlsx$'
 # 注：文件名首段即店铺键（含 JITX 后缀），须与 SHOPS 注册键一致（如 维维JITX）。
 
 # ── 店铺列表 ──────────────────────────────────────────────────────────────────
