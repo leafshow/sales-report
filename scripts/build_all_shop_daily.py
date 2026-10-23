@@ -105,7 +105,10 @@ def n(v):
     except Exception: return 0.0
 
 def t(v): return "-" if pd.isna(v) else str(v)
-def r(a,b): return None if not b else a/b
+def r(a,b):
+    """比率：分母为 0/None → None（前端显示 -），任一输入为 None（无数据）→ None"""
+    if a is None or b is None: return None
+    return None if not b else a/b
 
 def calc(row):
     row["conversion"]=r(row["buyers"],row["visitors"]); row["aov"]=r(row["gmv"],row["buyers"])
@@ -118,7 +121,7 @@ def calc(row):
 
 def base(rows):
     if not rows: return None
-    x={k:sum(z[k] for z in rows)/len(rows) for k in FIELDS}
+    x={k:(lambda vals: sum(vals)/len(vals) if vals else 0)([z[k] for z in rows if z.get(k) is not None]) for k in FIELDS}
     return calc(x)
 
 def pdd_parse_file(path, date):
@@ -140,7 +143,7 @@ def pdd_parse_file(path, date):
          "productImpressions": 0, "productImpressionUsers": 0,
          "addCartUsers": cnt("商品收藏用户数"),   # 拼多多无加购口径，收藏用户数等同加购
          "orderAmount": float(num("成交金额").sum()), "orderCount": cnt("确认订单数"),
-         "orderBuyers": cnt("下单用户数"), "refundAmount": 0.0}
+         "orderBuyers": cnt("下单用户数"), "refundAmount": None}
     row = calc(x)
     skus = []
     for _, s in df.iterrows():
@@ -155,7 +158,7 @@ def pdd_parse_file(path, date):
                      "buyers": sbuy, "visitors": svis,
                      "searchImpressions": 0, "searchClicks": 0,
                      "addCartUsers": int(pd.to_numeric(s["商品收藏用户数"], errors="coerce") or 0),
-                     "refundAmount": 0.0, "conversion": r(sbuy, svis),
+                     "refundAmount": None, "conversion": r(sbuy, svis),
                      "uvValue": r(sgmv, svis)})
     return row, skus
 
@@ -389,7 +392,7 @@ def jdself_inventory_metrics(path, date):
                  "unitsOutbound": int(s["_unitsOut"]), "stockValue": float(s["_stockVal"]),
                  "out30dValue": float(s["_out30Val"]), "outMtdValue": float(s["_outMtdVal"]), "orders": 0,
                  "buyers": 0, "visitors": 0, "searchImpressions": 0, "searchClicks": 0, "addCartUsers": 0,
-                 "refundAmount": 0.0, "conversion": None, "uvValue": None}
+                 "refundAmount": None, "conversion": None, "uvValue": None}
                 for _, s in g.iterrows()]
         result[shop] = {"gmvOutbound": float(g["_gmvOut"].sum()), "unitsOutbound": int(g["_unitsOut"].sum()),
                         "stockValue": float(g["_stockVal"].sum()), "out30dValue": float(g["_out30Val"].sum()),
@@ -427,7 +430,7 @@ def jdself_traffic_metrics(path, date):
                                   "orders": int(s["成交单量"]), "buyers": int(s["成交人数"]),
                                   "visitors": int(s["访客数"]),
                                   "searchImpressions": 0, "searchClicks": 0, "addCartUsers": int(s["加购人数"]),
-                                  "refundAmount": 0.0, "conversion": r(int(s["成交人数"]), int(s["访客数"])),
+                                  "refundAmount": None, "conversion": r(int(s["成交人数"]), int(s["访客数"])),
                                   "uvValue": r(float(s["成交金额"]), int(s["访客数"]))}
                                  for _, s in g.iterrows()]}
     return result
@@ -476,12 +479,12 @@ def shop_display(shop):
     return f"{PLATFORMS[shop_platform(shop)]}/{SHOP_META[shop][0]}"
 
 def vip_total_row(date, shop, row, count, source):
-    """唯品会合计行：字段精简，缺失指标置 0/None"""
+    """唯品会合计行：源表无退款数据 → None（前端显示 -）；orders 等无数据指标同 None"""
     x={"date":date,"shopRaw":shop,"shopDisplay":shop_display(shop),"skuCount":count,"sourceFile":source,
-       "gmv":n(row["销售额"]),"units":n(row["销售量"]),"orders":0,
+       "gmv":n(row["销售额"]),"units":n(row["销售量"]),"orders":None,
        "buyers":n(row["客户数"]),"visitors":n(row["商详UV"]),"pv":n(row["商详UV"]),
-       "searchImpressions":0,"searchClicks":0,"productImpressions":0,"productImpressionUsers":0,
-       "addCartUsers":0,"orderAmount":0,"orderCount":0,"orderBuyers":0,"refundAmount":0}
+       "searchImpressions":None,"searchClicks":None,"productImpressions":None,"productImpressionUsers":None,
+       "addCartUsers":None,"orderAmount":None,"orderCount":None,"orderBuyers":None,"refundAmount":None}
     return calc(x)
 
 def vip_sku_rows(date, shop, df):
@@ -491,8 +494,8 @@ def vip_sku_rows(date, shop, df):
         x={"date":date,"shopRaw":shop,"shopDisplay":shop_display(shop),"sku":t(q["商品ID"]),"name":t(q["商品名称"]),
            "category1":"未分类","category2":"未分类","category3":"未分类",
            "gmv":n(q["销售额"]),"units":n(q["销售量"]),"orders":0,
-           "buyers":n(q["客户数"]),"visitors":n(q["商详UV"]),"searchImpressions":0,
-           "searchClicks":0,"addCartUsers":0,"refundAmount":0}
+           "buyers":n(q["客户数"]),"visitors":n(q["商详UV"]),"searchImpressions":None,
+           "searchClicks":None,"addCartUsers":None,"refundAmount":None}
         x["conversion"]=r(x["buyers"],x["visitors"]); x["uvValue"]=r(x["gmv"],x["visitors"]); out.append(x)
     return out
 
@@ -764,7 +767,7 @@ def build(plat_only=None, force=False):
                  "searchImpressions": 0, "searchClicks": 0,
                  "productImpressions": 0, "productImpressionUsers": 0,
                  "orderAmount": float(retail.get("gmv", 0.0)), "orderCount": int(retail.get("orders", 0)),
-                 "orderBuyers": int(retail.get("buyers", 0)), "refundAmount": 0.0}
+                 "orderBuyers": int(retail.get("buyers", 0)), "refundAmount": None}
             pairs.add((key,date))
             x["shopRaw"]=key; x["shopDisplay"]=shop_display(key)
             shop_rows[key].append(calc(x))
@@ -953,7 +956,9 @@ def build(plat_only=None, force=False):
         rows=[shop_rows[s] for s in shops if (s,date) in pairs]; cur=[]
         for rr in rows: cur.append(next(x for x in rr if x["date"]==date))
         x={"date":date,"shopCount":len(cur),"skuCount":sum(z["skuCount"] for z in cur)}
-        for k in FIELDS:x[k]=sum(z[k] for z in cur)
+        for k in FIELDS:
+            vals=[z[k] for z in cur if z.get(k) is not None]
+            x[k]=sum(vals) if vals else None
         overall.append(calc(x))
     for i,x in enumerate(overall):x["baseline"]=base(overall[max(0,i-BASELINE_WIN):i]);x["week"]=overall[i-WEEK_AGO_WIN] if i>=WEEK_AGO_WIN else None
     cats={}; tops={}; movers={}; alerts={}
@@ -1041,7 +1046,8 @@ def build(plat_only=None, force=False):
         return [next(x for x in rows if x["date"]==date) for date in window if date in have]
     def window_summary(rows,window):
         items=window_rows(rows,window)
-        summary={field:sum(x.get(field,0) for x in items) for field in FIELDS+config.SELF_FIELDS}
+        summary={field:(lambda vals: sum(vals) if vals else None)([x.get(field) for x in items if x.get(field) is not None])
+                 for field in FIELDS+config.SELF_FIELDS}
         return calc(summary)
     def optimization_shop(shop):
         rows=shop_rows[shop]
@@ -1100,8 +1106,8 @@ def build(plat_only=None, force=False):
         if state["hitDays"]<3:continue
         latest_item=state["latest"];last_date=state["lastDate"]
         day_overall=next(x for x in overall if x["date"]==last_date)
-        overall_cart_rate=day_overall["addCartUsers"]/day_overall["visitors"] if day_overall["visitors"] else None
-        item_cart_rate=latest_item["addCartUsers"]/latest_item["visitors"] if latest_item["visitors"] else None
+        overall_cart_rate=day_overall["addCartUsers"]/day_overall["visitors"] if day_overall.get("visitors") and day_overall.get("addCartUsers") is not None else None
+        item_cart_rate=latest_item["addCartUsers"]/latest_item["visitors"] if latest_item.get("visitors") and latest_item.get("addCartUsers") is not None else None
         action="优化主图、价格与卖点承接"
         if overall_cart_rate and item_cart_rate and item_cart_rate>=overall_cart_rate*.75:
             action="检查详情页优惠、库存与下单承接"
@@ -1128,7 +1134,9 @@ def build(plat_only=None, force=False):
             cur=[x for x in cur if x is not None]
             if not cur: continue
             x={"date":date,"shopCount":len(cur),"skuCount":sum(z["skuCount"] for z in cur)}
-            for k in FIELDS:x[k]=sum(z[k] for z in cur)
+            for k in FIELDS:
+                vals=[z[k] for z in cur if z.get(k) is not None]
+                x[k]=sum(vals) if vals else None
             poverall.append(calc(x))
         for i,x in enumerate(poverall):x["baseline"]=base(poverall[max(0,i-BASELINE_WIN):i]);x["week"]=poverall[i-WEEK_AGO_WIN] if i>=WEEK_AGO_WIN else None
         opt_platforms[plat]={"overallRecent":window_summary(poverall,recent_dates),"overallPrior":window_summary(poverall,prior_dates),

@@ -1415,7 +1415,7 @@
           o.aov = o.buyers ? o.gmv / o.buyers : null;
           o.uvValue = o.visitors ? o.gmv / o.visitors : null;
           o.unitPrice = o.units ? o.gmv / o.units : null;
-          o.refundRate = o.gmv ? o.refundAmount / o.gmv : null;
+          o.refundRate = o.refundAmount == null ? null : o.gmv ? o.refundAmount / o.gmv : null;
           return o;
         }
         const C = (raw, dts) => {
@@ -1434,7 +1434,7 @@
           o.conversion = o.buyers && o.visitors ? o.buyers / o.visitors : null;
           o.aov = o.buyers ? o.gmv / o.buyers : null;
           o.uvValue = o.visitors ? o.gmv / o.visitors : null;
-          o.refundRate = o.gmv ? o.refundAmount / o.gmv : null;
+          o.refundRate = o.refundAmount == null ? null : o.gmv ? o.refundAmount / o.gmv : null;
           return o;
         };
         const RD = () => rangeDates();
@@ -1557,7 +1557,8 @@
                       addCartRate: null,
                       orderConversion: null,
                       orderCompletion: null,
-                      refundRate: x.gmv ? x.refundAmount / x.gmv : null,
+                      refundRate:
+                        x.refundAmount == null ? null : x.gmv ? x.refundAmount / x.gmv : null,
                     }
                   : null;
               return Object.assign(x, c || {});
@@ -2368,7 +2369,10 @@
           const isGrouped = state.shop === "ALL" && state.platform === "ALL";
           const aggGroup = (list) => {
             const g = list.map((z) => z.c);
-            const s = (k) => g.reduce((a, x) => a + (x[k] || 0), 0);
+            const s = (k) => {
+              const vals = g.map((x) => x[k]).filter((v) => v != null);
+              return vals.length ? vals.reduce((a, v) => a + v, 0) : null;
+            };
             let mtd = 0,
               mtdHas = false,
               bd = 0,
@@ -2427,10 +2431,12 @@
             const stockTd = sv
               ? `<td>${K.stock > 0 ? M2(K.stock) : "-"}</td><td>${K.stock > 0 && K.out30 > 0 ? (K.stock / (K.out30 / 30)).toFixed(1) + " 天" : "-"}</td>`
               : "";
-            return `<tr class="total-row sub" data-group="${k}"><td>${label}</td>${outTd}${mtdTd}${stockTd}<td>${M2(K.gmv)}</td><td>-</td><td>-</td><td>-</td><td>${I(K.vis)}</td><td>-</td><td>${K.buy > 0 && K.vis > 0 ? P(K.buy / K.vis) : "-"}</td><td>-</td><td>${K.buy > 0 ? M2(K.gmv / K.buy) : "-"}</td><td>${K.vis > 0 ? M2(K.gmv / K.vis) : "-"}</td><td>${K.gmv > 0 ? P(K.s("refundAmount") / K.gmv) : "-"}</td></tr>`;
+            const refundAny = g.some((x) => x.refundAmount != null);
+            return `<tr class="total-row sub" data-group="${k}"><td>${label}</td>${outTd}${mtdTd}${stockTd}<td>${M2(K.gmv)}</td><td>-</td><td>-</td><td>-</td><td>${I(K.vis)}</td><td>-</td><td>${K.buy > 0 && K.vis > 0 ? P(K.buy / K.vis) : "-"}</td><td>-</td><td>${K.buy > 0 ? M2(K.gmv / K.buy) : "-"}</td><td>${K.vis > 0 ? M2(K.gmv / K.vis) : "-"}</td><td>${refundAny && K.gmv > 0 ? P(K.s("refundAmount") / K.gmv) : "-"}</td></tr>`;
           };
+          const refundAnyAll = cs.some((x) => x.refundAmount != null);
           const totalRowHtml =
-            `<tr class="total-row"><td><strong>合计</strong></td>${totOutTd}${totMtdTd}${totStockTd}<td>${M2(sumGmv)}</td><td>${sumGmv > 0 ? P1(1) : "-"}</td><td>-</td><td>-</td><td>${I(sumVis)}</td><td>-</td><td>${sumBuy > 0 && sumVis > 0 ? P(sumBuy / sumVis) : "-"}</td><td>-</td><td>${sumBuy > 0 ? M2(sumGmv / sumBuy) : "-"}</td><td>${sumVis > 0 ? M2(sumGmv / sumVis) : "-"}</td><td>${sumGmv > 0 ? P(sum("refundAmount") / sumGmv) : "-"}</td></tr>`;
+            `<tr class="total-row"><td><strong>合计</strong></td>${totOutTd}${totMtdTd}${totStockTd}<td>${M2(sumGmv)}</td><td>${sumGmv > 0 ? P1(1) : "-"}</td><td>-</td><td>-</td><td>${I(sumVis)}</td><td>-</td><td>${sumBuy > 0 && sumVis > 0 ? P(sumBuy / sumVis) : "-"}</td><td>-</td><td>${sumBuy > 0 ? M2(sumGmv / sumBuy) : "-"}</td><td>${sumVis > 0 ? M2(sumGmv / sumVis) : "-"}</td><td>${refundAnyAll && sumGmv > 0 ? P(sum("refundAmount") / sumGmv) : "-"}</td></tr>`;
           const totalRows = isGrouped
             ? totalRowHtml + subTotalRow("├ 京东自营", "self") + subTotalRow("└ 非京东自营", "other")
             : totalRowHtml;
