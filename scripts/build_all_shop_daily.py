@@ -106,11 +106,6 @@ def n(v):
 
 def t(v): return "-" if pd.isna(v) else str(v)
 def r(a,b): return None if not b else a/b
-def sqlnum(v):
-    """f-string 插入 DuckDB 时的数值格式化：None → NULL（避免写入字符串 'None'）"""
-    if v is None: return "NULL"
-    if isinstance(v, float) and (v != v or v in (float("inf"), float("-inf"))): return "NULL"
-    return repr(float(v)) if isinstance(v, float) else str(v)
 
 def calc(row):
     row["conversion"]=r(row["buyers"],row["visitors"]); row["aov"]=r(row["gmv"],row["buyers"])
@@ -1210,29 +1205,31 @@ if __name__=="__main__":
         con.execute("CREATE TABLE alerts (date VARCHAR, level VARCHAR, scope VARCHAR, type VARCHAR, detail VARCHAR, current DOUBLE, previous DOUBLE, change DOUBLE)")
         con.execute("CREATE TABLE optimization (key VARCHAR PRIMARY KEY, value VARCHAR)")
         # meta
-        con.execute(f"INSERT INTO meta VALUES ('generatedAt', '{data['generatedAt']}')")
-        con.execute(f"INSERT INTO meta VALUES ('sourceDir', '{data['sourceDir']}')")
-        con.execute(f"INSERT INTO meta VALUES ('shops', '{json.dumps(data['shops'], ensure_ascii=False).replace(chr(39), chr(92)+chr(39))}')")
-        con.execute(f"INSERT INTO meta VALUES ('platforms', '{json.dumps(data['platforms'], ensure_ascii=False)}')")
-        con.execute(f"INSERT INTO meta VALUES ('dates', '{json.dumps(data['dates'], ensure_ascii=False).replace(chr(39), chr(92)+chr(39))}')")
-        con.execute(f"INSERT INTO meta VALUES ('moduleFilters', '{json.dumps(data.get('moduleFilters', {}), ensure_ascii=False).replace(chr(39), chr(92)+chr(39))}')")
-        con.execute(f"INSERT INTO meta VALUES ('targets', '{json.dumps(data.get('targets', {}), ensure_ascii=False).replace(chr(39), chr(92)+chr(39))}')")
+        con.executemany("INSERT INTO meta VALUES (?, ?)", [
+            ("generatedAt", data["generatedAt"]),
+            ("sourceDir", data["sourceDir"]),
+            ("shops", json.dumps(data["shops"], ensure_ascii=False)),
+            ("platforms", json.dumps(data["platforms"], ensure_ascii=False)),
+            ("dates", json.dumps(data["dates"], ensure_ascii=False)),
+            ("moduleFilters", json.dumps(data.get("moduleFilters", {}), ensure_ascii=False)),
+            ("targets", json.dumps(data.get("targets", {}), ensure_ascii=False)),
+        ])
         # quality
         for k, v in data["quality"].items():
             if isinstance(v, (int, float)):
-                con.execute(f"INSERT INTO quality VALUES ('{k}', '{v}')")
+                con.execute("INSERT INTO quality VALUES (?, ?)", [k, str(v).lower() if isinstance(v, bool) else v])
             elif isinstance(v, bool):
-                con.execute(f"INSERT INTO quality VALUES ('{k}', '{str(v).lower()}')")
+                con.execute("INSERT INTO quality VALUES (?, ?)", [k, str(v).lower()])
             else:
                 sv = json.dumps(v, ensure_ascii=False) if isinstance(v, list) else str(v)
-                con.execute(f"INSERT INTO quality VALUES ('{k}', '{sv.replace(chr(39), chr(92)+chr(39))}')")
+                con.execute("INSERT INTO quality VALUES (?, ?)", [k, sv])
         # overall
         for r in data["overall"]:
             bl = json.dumps(r.get("baseline"), ensure_ascii=False) if r.get("baseline") else None
             wk = json.dumps(r.get("week"), ensure_ascii=False) if r.get("week") else None
-            bl_s = f"'{bl.replace(chr(39), chr(92)+chr(39))}'" if bl else "NULL"
-            wk_s = f"'{wk.replace(chr(39), chr(92)+chr(39))}'" if wk else "NULL"
-            con.execute(f"INSERT INTO overall VALUES ('{r['date']}', {r.get('shopCount',0)}, {r.get('skuCount',0)}, {r.get('gmv',0)}, {r.get('units',0)}, {r.get('orders',0)}, {r.get('buyers',0)}, {r.get('visitors',0)}, {sqlnum(r.get('conversion'))}, {sqlnum(r.get('aov'))}, {sqlnum(r.get('uvValue'))}, {r.get('addCartUsers',0)}, {r.get('refundAmount',0)}, {sqlnum(r.get('refundRate'))}, {bl_s}, {wk_s})")
+            con.execute("INSERT INTO overall VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        [r["date"], r.get("shopCount",0), r.get("skuCount",0), r.get("gmv",0), r.get("units",0), r.get("orders",0), r.get("buyers",0), r.get("visitors",0),
+                         r.get("conversion"), r.get("aov"), r.get("uvValue"), r.get("addCartUsers",0), r.get("refundAmount",0), r.get("refundRate"), bl, wk])
         # shop_daily
         shop_daily_keys = set()
         for shop, rows in data["shopDaily"].items():
@@ -1243,21 +1240,21 @@ if __name__=="__main__":
                 shop_daily_keys.add((r["date"], r["shopRaw"]))
                 bl = json.dumps(r.get("baseline"), ensure_ascii=False) if r.get("baseline") else None
                 wk = json.dumps(r.get("week"), ensure_ascii=False) if r.get("week") else None
-                bl_s = f"'{bl.replace(chr(39), chr(92)+chr(39))}'" if bl else "NULL"
-                wk_s = f"'{wk.replace(chr(39), chr(92)+chr(39))}'" if wk else "NULL"
-                con.execute(f"INSERT INTO shop_daily VALUES ('{r['date']}', '{r['shopRaw']}', {r.get('skuCount',0)}, {r.get('gmv',0)}, {r.get('units',0)}, {r.get('orders',0)}, {r.get('buyers',0)}, {r.get('visitors',0)}, {sqlnum(r.get('conversion'))}, {sqlnum(r.get('aov'))}, {sqlnum(r.get('uvValue'))}, {r.get('refundAmount',0)}, {sqlnum(r.get('refundRate'))}, {bl_s}, {wk_s}, {sqlnum(r.get('gmvOutbound'))}, {sqlnum(r.get('unitsOutbound'))}, {sqlnum(r.get('stockValue'))}, {sqlnum(r.get('out30dValue'))}, {sqlnum(r.get('outMtdValue'))})")
+                con.execute("INSERT INTO shop_daily VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            [r["date"], r["shopRaw"], r.get("skuCount",0), r.get("gmv",0), r.get("units",0), r.get("orders",0), r.get("buyers",0), r.get("visitors",0),
+                             r.get("conversion"), r.get("aov"), r.get("uvValue"), r.get("refundAmount",0), r.get("refundRate"), bl, wk,
+                             r.get("gmvOutbound"), r.get("unitsOutbound"), r.get("stockValue"), r.get("out30dValue"), r.get("outMtdValue")])
         # categories
         for date, rows in data["categories"].items():
             for r in rows:
                 p = r["shopRaw"] + "/" + r["category3"]   # 用内部 key（平台|店铺名），供前端按平台过滤
-                p_esc = p.replace(chr(39), chr(92)+chr(39))
-                l1_esc = r["category1"].replace(chr(39), chr(92)+chr(39))
-                l2_esc = r["category2"].replace(chr(39), chr(92)+chr(39))
-                l3_esc = r["category3"].replace(chr(39), chr(92)+chr(39))
                 visitors = int(r.get('visitors',0)) if r.get('visitors') is not None else 0
                 gmv_val = r.get('gmv',0) if r.get('gmv') is not None else 0
                 refund = r.get('refundAmount',0) if r.get('refundAmount') is not None else 0
-                con.execute(f"INSERT INTO categories VALUES ('{date}', '{p_esc}', '{l1_esc}', '{l2_esc}', '{l3_esc}', {sqlnum(gmv_val) if gmv_val else 0}, {int(r.get('units',0) or 0)}, {int(r.get('orders',0) or 0)}, {int(r.get('skuCount',0) or 0)}, {visitors}, {refund if refund is not None else 0}, {sqlnum(r.get('gmvOutbound'))})")
+                con.execute("INSERT INTO categories VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            [date, p, r["category1"], r["category2"], r["category3"],
+                             gmv_val if gmv_val else 0, int(r.get('units',0) or 0), int(r.get('orders',0) or 0), int(r.get('skuCount',0) or 0),
+                             visitors, refund if refund is not None else 0, r.get('gmvOutbound')])
         # city_stock（划转 SKU 的城市库存行归属划入店——店铺划转口径）
         _cx = data.get("_shopOverride") or {}
         for date, shops_cs in data.get("cityStock", {}).items():
@@ -1267,30 +1264,31 @@ if __name__=="__main__":
                     _tk = _cx.get(_sku)
                     key = _tk if (_tk and _tk in SHOP_META) else f"jd_self|{shop}"
                     if key not in SHOP_META: continue
-                    name_esc=str(r["name"]).replace(chr(39), chr(92)+chr(39))
-                    con.execute(f"INSERT INTO city_stock VALUES ('{date}', '{key}', '{r['sku']}', '{name_esc}', '{r['city']}', {r['stock']}, {r['dailyAvg']}, {r['daysCover'] if r['daysCover'] is not None else 'NULL'}, {r['outYesterday']}, {r['out7d']}, {r['natStock']}, {r['natDaysCover'] if r['natDaysCover'] is not None else 'NULL'}, {r.get('natTransit', 0)}, {r.get('natOutYesterday', 0)}, {r.get('natOut7d', 0)}, {r['price']})")
+                    con.execute("INSERT INTO city_stock VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                [date, key, r["sku"], r["name"], r["city"], r["stock"], r["dailyAvg"], r["daysCover"],
+                                 r["outYesterday"], r["out7d"], r["natStock"], r["natDaysCover"],
+                                 r.get("natTransit", 0), r.get("natOutYesterday", 0), r.get("natOut7d", 0), r["price"]])
 
         # top_skus
         for date, rows in data["topSkus"].items():
             for r in rows:
-                name_esc = r["name"].replace(chr(39), chr(92)+chr(39))
-                conv = sqlnum(r.get('conversion'))
-                uvv = sqlnum(r.get('uvValue'))
-                con.execute(f"INSERT INTO top_skus VALUES ('{date}', '{r['shopRaw']}', '{r['sku']}', '{name_esc}', {r['gmv'] if r['gmv'] is not None else 0}, {int(r['units'] or 0)}, {int(r['visitors'] or 0)}, {conv}, {uvv}, {r['refundAmount'] if r.get('refundAmount') is not None else 0}, {sqlnum(r.get('gmvOutbound'))})")
+                con.execute("INSERT INTO top_skus VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            [date, r["shopRaw"], r["sku"], r["name"], r["gmv"] if r["gmv"] is not None else 0,
+                             int(r["units"] or 0), int(r["visitors"] or 0), r.get("conversion"), r.get("uvValue"),
+                             r["refundAmount"] if r.get("refundAmount") is not None else 0, r.get("gmvOutbound")])
         # movers
         for date, mv in data["movers"].items():
             for r in mv.get("risers", []):
-                name_esc = r["name"].replace(chr(39), chr(92)+chr(39))
-                con.execute(f"INSERT INTO movers VALUES ('{date}', 'riser', '{r['shopRaw']}', '{r['sku']}', '{name_esc}', {sqlnum(r.get('previousGmv'))}, {sqlnum(r.get('gmv'))}, {sqlnum(r.get('delta'))})")
+                con.execute("INSERT INTO movers VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                            [date, "riser", r["shopRaw"], r["sku"], r["name"], r.get("previousGmv"), r.get("gmv"), r.get("delta")])
             for r in mv.get("fallers", []):
-                name_esc = r["name"].replace(chr(39), chr(92)+chr(39))
-                con.execute(f"INSERT INTO movers VALUES ('{date}', 'faller', '{r['shopRaw']}', '{r['sku']}', '{name_esc}', {sqlnum(r.get('previousGmv'))}, {sqlnum(r.get('gmv'))}, {sqlnum(r.get('delta'))})")
+                con.execute("INSERT INTO movers VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                            [date, "faller", r["shopRaw"], r["sku"], r["name"], r.get("previousGmv"), r.get("gmv"), r.get("delta")])
         # alerts
         for date, aa in data["alerts"].items():
             for a in aa:
-                detail_esc = a["detail"].replace(chr(39), chr(92)+chr(39))
-                scope_esc = a["scope"].replace(chr(39), chr(92)+chr(39))
-                con.execute(f"INSERT INTO alerts VALUES ('{date}', '{a['level']}', '{scope_esc}', '{a['type']}', '{detail_esc}', {sqlnum(a.get('current'))}, {sqlnum(a.get('previous'))}, {sqlnum(a.get('change'))})")
+                con.execute("INSERT INTO alerts VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                            [date, a["level"], a["scope"], a["type"], a["detail"], a.get("current"), a.get("previous"), a.get("change")])
         # optimization
         opt_flat = {}
         def _flatten(d, p=""):
@@ -1302,10 +1300,10 @@ if __name__=="__main__":
         _flatten(data["optimization"])
         for k, v in opt_flat.items():
             if isinstance(v, (list, dict)):
-                sv = json.dumps(v, ensure_ascii=False).replace(chr(39), chr(92)+chr(39))
+                sv = json.dumps(v, ensure_ascii=False)
             else:
-                sv = str(v).replace(chr(39), chr(92)+chr(39))
-            con.execute(f"INSERT INTO optimization VALUES ('{k}', '{sv}')")
+                sv = str(v)
+            con.execute("INSERT INTO optimization VALUES (?, ?)", [k, sv])
         pass  # DuckDB auto-commits
     finally:
         con.close()
