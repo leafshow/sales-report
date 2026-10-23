@@ -523,69 +523,6 @@ def trim_change(x):
     keys = ["shopRaw","shopDisplay","sku","name","previousGmv","gmv","delta"]
     return {k:x[k] for k in keys}
 
-def svg_gmv_chart(rows):
-    if not rows:
-        return "<div class=callout>暂无GMV趋势数据。</div>"
-    width,height,left,right,top,bottom=980,320,58,18,22,56
-    plot_w,plot_h=width-left-right,height-top-bottom
-    values=[x["gmv"] for x in rows]; max_value=max(values)*1.12 or 1
-    slot=plot_w/len(rows); bar_width=min(28,slot*.62)
-    def x(i): return left+i*slot+slot/2
-    def y(v): return top+(1-v/max_value)*plot_h
-    grid=[]
-    for tick in [0,.25,.5,.75,1]:
-        value=max_value*tick; yy=y(value)
-        grid.append(f'<line x1="{left}" y1="{yy:.1f}" x2="{width-right}" y2="{yy:.1f}" stroke="#e5eaf2"/><text x="{left-8}" y="{yy+4:.1f}" text-anchor="end" class=sl>¥{value/10000:.1f}万</text>')
-    bars=[]
-    for i,row in enumerate(rows):
-        value=row["gmv"]; xx=x(i)-bar_width/2; yy=y(value); bar_h=max(2,plot_h-(yy-top))
-        label=f'{row["date"]}：¥{value:,.2f}'
-        bars.append(f'<rect class="chart-bar" data-date="{row["date"]}" x="{xx:.1f}" y="{yy:.1f}" width="{bar_width:.1f}" height="{bar_h:.1f}" rx="4" fill="#1657ff"><title>{label}</title></rect>')
-        # 全部日期均显示刻度；间距密时围绕自身锚点 -60° 斜排防重叠
-        tick_rot=" rotate(-60 {0:.1f} {1:.1f})".format if slot<34 else (lambda _x,_y:"")
-        bars.append(f'<text class=sl x="{x(i):.1f}" y="{height-18}" text-anchor="middle" transform="{tick_rot(x(i),height-18)}">{row["date"][5:]}</text>')
-    latest=max(rows,key=lambda z:z["date"]); lx=x(rows.index(latest)); ly=y(latest["gmv"])
-    # 数值改悬停查看：柱自带 <title> 提示，不再静态绘制数值标签，保持与转化率图一致
-    labels=""
-    marker=""
-    return f'<svg class=chart-svg viewBox="0 0 {width} {height}" role="img" aria-label="每日GMV趋势柱状图"><text class=sl x="{left}" y="14">GMV</text>{"".join(grid)}{"".join(bars)}{labels}{marker}</svg>'
-
-def svg_conversion_chart(rows):
-    if not rows:
-        return "<div class=callout>暂无转化率趋势数据。</div>"
-    width,height,left,right,top,bottom=980,300,52,20,22,50
-    plot_w,plot_h=width-left-right,height-top-bottom
-    rows=[x for x in rows if x.get("conversion") is not None]   # 剔除无转化率数据
-    values=[x["conversion"] for x in rows]
-    if not values:return "<div class=callout>暂无转化率数据（该平台未提供流量/转化指标）。</div>"
-    vmin,vmax=min(values),max(values); padding=(vmax-vmin or vmax or .01)*.22
-    y0=max(0,vmin-padding); y1=vmax+padding
-    def x(i): return left+i*plot_w/max(1,len(rows)-1)   # 单日数据时收敛为单点，避免除零
-    def y(v): return top+(1-(v-y0)/(y1-y0))*plot_h
-    grid=[]
-    for tick in [0,.25,.5,.75,1]:
-        value=y0+tick*(y1-y0); yy=y(value)
-        grid.append(f'<line x1="{left}" y1="{yy:.1f}" x2="{width-right}" y2="{yy:.1f}" stroke="#e5eaf2"/><text x="{left-8}" y="{yy+4:.1f}" text-anchor="end" class=sl>{value*100:.1f}%</text>')
-    points=[]
-    for i,row in enumerate(rows):
-        if row.get("conversion") is None: continue
-        xx,yy=x(i),y(row["conversion"])
-        points.append(f'<circle class="chart-point" data-date="{row["date"]}" cx="{xx:.1f}" cy="{yy:.1f}" r="4" fill="#1657ff" stroke="#fff" stroke-width="2"><title>{row["date"]}：{row["conversion"]*100:.2f}%</title></circle>')
-        # 全部日期均显示刻度；间距密时围绕自身锚点 -60° 斜排防重叠
-        _step=plot_w/max(1,len(rows)-1); tick_rot=" rotate(-60 {0:.1f} {1:.1f})".format if _step<44 else (lambda _x,_y:"")
-        points.append(f'<text class=sl x="{xx:.1f}" y="{height-14}" text-anchor="middle" transform="{tick_rot(xx,height-14)}">{row["date"][5:]}</text>')
-    path=" ".join(("M" if i==0 else "L")+f'{x(i):.1f},{y(row["conversion"]):.1f}' for i,row in enumerate(rows) if row.get("conversion") is not None)
-    latest=max(rows,key=lambda z:z["date"]); lx,ly=x(rows.index(latest)),y(latest["conversion"])
-    step=plot_w/max(1,len(rows)-1)
-    # 数值标签：最多展示最近一个完整月(31点)；过密时围绕标签自身锚点 -60° 斜排；上移避让折线
-    shown={id(r) for r in rows[-31:]}
-    rot=" rotate(-60 {0:.1f} {1:.1f})".format if step<44 else (lambda _x,_y:"")
-    # 末行不再额外叠 marker，逐点数值已覆盖
-    # 数值改悬停查看：点自带 <title> 提示，不再静态绘制数值标签，避免拥挤重叠
-    labels=""
-    marker=""
-    return f'<svg class=chart-svg viewBox="0 0 {width} {height}" role="img" aria-label="每日成交转化率趋势折线图"><text class=sl x="{left}" y="14">成交转化率</text>{"".join(grid)}<path d="{path}" fill="none" stroke="#1657ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>{"".join(points)}{labels}{marker}</svg>'
-
 def build(plat_only=None, force=False):
     # 收集各平台文件：[(path, platform)]
     # plat_only：指定平台时仅重新解析该平台目录，其余平台从缓存（.build_cache/<plat>.pkl）载入解析中间产物
@@ -1101,21 +1038,6 @@ def build(plat_only=None, force=False):
     # 图表以月度展示：默认取末行所在月
     def month_rows(rs):
         return rs if not rs else [r for r in rs if r["date"][:7]==rs[-1]["date"][:7]]
-    charts={"ALL":{"gmv":svg_gmv_chart(month_rows(overall)),"conversion":svg_conversion_chart(month_rows(overall))}}
-    # 按平台聚合图表（前端平台切换时使用）
-    for plat in PLATFORMS:
-        plat_shops=[s for s in shops if shop_platform(s)==plat]
-        plat_overall=[]
-        for date in dates:
-            cur=[next((x for x in shop_rows[s] if x["date"]==date),None) for s in plat_shops]
-            cur=[x for x in cur if x is not None]
-            if not cur: continue
-            x={"date":date,"shopCount":len(cur),"skuCount":sum(z["skuCount"] for z in cur)}
-            for k in FIELDS:x[k]=sum(z[k] for z in cur)
-            plat_overall.append(calc(x))
-        charts[plat]={"gmv":svg_gmv_chart(month_rows(plat_overall)),"conversion":svg_conversion_chart(month_rows(plat_overall))}
-    for shop in shops:
-        charts[shop]={"gmv":svg_gmv_chart(month_rows(shop_rows[shop])),"conversion":svg_conversion_chart(month_rows(shop_rows[shop]))}
     recent_dates=dates[-RECENT_DAYS:]
     prior_dates=dates[-RESEARCH_DAYS:-RECENT_DAYS] if len(dates)>=RESEARCH_DAYS else dates[:max(0,len(dates)-RECENT_DAYS)]
     def window_rows(rows,window):
@@ -1229,7 +1151,7 @@ def build(plat_only=None, force=False):
     }
     return {"generatedAt":datetime.now().strftime("%Y-%m-%d %H:%M"),"sourceDir":"多平台导出（京东商智 + 唯品会 + 拼多多）",
             "shops":[{"raw":s,"display":shop_display(s),"brand":SHOP_META[s][1],"platform":shop_platform(s)} for s in shops],"platforms":PLATFORMS,"dates":dates,"overall":overall,
-            "shopDaily":shop_rows,"categories":cats,"topSkus":tops,"movers":movers,"alerts":alerts,"quality":q,"charts":charts,"cityStock":city_stock,
+            "shopDaily":shop_rows,"categories":cats,"topSkus":tops,"movers":movers,"alerts":alerts,"quality":q,"cityStock":city_stock,
             "_shopOverride": shop_key_map,
             "optimization":optimization,
             "moduleFilters":config.MODULE_SHOPS_FILTER,
@@ -1261,8 +1183,6 @@ if __name__=="__main__":
     payload=json.dumps(data,ensure_ascii=False,separators=(",",":"),allow_nan=False)
     # ① 输出轻量版 HTML（从 /api/data 加载数据，供 Vercel 部署）
     html = TEMPLATE.read_text(encoding="utf-8")
-    html = html.replace("__GMV_CHART__", data["charts"]["ALL"]["gmv"])
-    html = html.replace("__CONV_CHART__", data["charts"]["ALL"]["conversion"])
     # 首页模块排布顺序：读 scripts/section_order.json（格式 ["模块ID | 中文名", ...]，按行序排列）；
     # 缺省/损坏时保持模板默认；未列出的模块排在最后
     try:
@@ -1281,7 +1201,6 @@ if __name__=="__main__":
     try:
         con.execute("CREATE TABLE meta (key VARCHAR PRIMARY KEY, value VARCHAR)")
         con.execute("CREATE TABLE quality (key VARCHAR PRIMARY KEY, value VARCHAR)")
-        con.execute("CREATE TABLE charts (schema_key VARCHAR, chart_type VARCHAR, svg_text VARCHAR, PRIMARY KEY(schema_key, chart_type))")
         con.execute("CREATE TABLE overall (date VARCHAR PRIMARY KEY, shop_count BIGINT, sku_count BIGINT, gmv DOUBLE, units BIGINT, orders BIGINT, buyers BIGINT, visitors BIGINT, conversion DOUBLE, aov DOUBLE, uv_value DOUBLE, add_cart_users BIGINT, refund_amount DOUBLE, refund_rate DOUBLE, baseline VARCHAR, week VARCHAR)")
         con.execute("CREATE TABLE shop_daily (date VARCHAR, shop VARCHAR, sku_count BIGINT, gmv DOUBLE, units BIGINT, orders BIGINT, buyers BIGINT, visitors BIGINT, conversion DOUBLE, aov DOUBLE, uv_value DOUBLE, refund_amount DOUBLE, refund_rate DOUBLE, baseline VARCHAR, week VARCHAR, gmv_outbound DOUBLE, units_outbound BIGINT, stock_value DOUBLE, out30d_value DOUBLE, out_mtd_value DOUBLE, PRIMARY KEY(date, shop))")
         con.execute("CREATE TABLE categories (date VARCHAR, path VARCHAR, l1 VARCHAR, l2 VARCHAR, l3 VARCHAR, gmv DOUBLE, units BIGINT, orders BIGINT, sku_count BIGINT, visitors BIGINT, refund_amount DOUBLE, gmv_outbound DOUBLE)")
@@ -1307,11 +1226,6 @@ if __name__=="__main__":
             else:
                 sv = json.dumps(v, ensure_ascii=False) if isinstance(v, list) else str(v)
                 con.execute(f"INSERT INTO quality VALUES ('{k}', '{sv.replace(chr(39), chr(92)+chr(39))}')")
-        # charts
-        for s, ch in data["charts"].items():
-            for ct, svg in ch.items():
-                escaped = svg.replace(chr(39), chr(92)+chr(39))
-                con.execute(f"INSERT INTO charts VALUES ('{s}', '{ct}', '{escaped}')")
         # overall
         for r in data["overall"]:
             bl = json.dumps(r.get("baseline"), ensure_ascii=False) if r.get("baseline") else None

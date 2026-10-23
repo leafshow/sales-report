@@ -19,7 +19,6 @@ PLATFORM_DIRS = {
 # 兼容旧变量：DATA_DIR 覆盖京东目录
 if os.environ.get('DATA_DIR', ''):
     PLATFORM_DIRS['jd'] = Path(os.environ['DATA_DIR'])
-INPUT = PLATFORM_DIRS['jd']  # 兼容旧引用
 # OUT：生成的报表 HTML（自动定位到 templates/index.html）
 OUT = Path(__file__).parent.parent / 'templates' / 'index.html'
 # TEMPLATE：HTML 模板源码（含 __DATA__ 占位符，用于离线内嵌版）

@@ -150,11 +150,6 @@ def handler():
                 "level": row[1], "scope": row[2], "type": row[3],
                 "detail": row[4], "current": row[5], "previous": row[6], "change": row[7]})
 
-        # charts
-        charts = {}
-        for row in con.sql("SELECT schema_key,chart_type,svg_text FROM charts").fetchall():
-            charts.setdefault(row[0], {})[row[1]] = row[2]
-
         # optimization
         opt_rows = {r[0]: r[1] for r in con.sql("SELECT key,value FROM optimization").fetchall()}
         optimization = {}
@@ -178,7 +173,7 @@ def handler():
             "overall": overall, "shopDaily": shop_daily,
             "categories": categories, "topSkus": top_skus,
             "movers": movers, "alerts": alerts,
-            "quality": quality, "charts": charts, "cityStock": city_stock, "targets": json.loads(meta_rows.get("targets", "{}")) if isinstance(meta_rows.get("targets", "{}"), str) else (meta_rows.get("targets") or {}),
+            "quality": quality, "cityStock": city_stock, "targets": json.loads(meta_rows.get("targets", "{}")) if isinstance(meta_rows.get("targets", "{}"), str) else (meta_rows.get("targets") or {}),
             "optimization": optimization,
         }
         return _resp(200, result)

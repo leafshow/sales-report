@@ -1176,7 +1176,7 @@
               </div>
             </div>
             <div class="box" id="gmv-chart" aria-label="GMV趋势柱状图">
-              __GMV_CHART__
+              <!-- 由前端 svgGmvChart 渲染 -->
             </div>
           </section>
           <section data-sec="conv-trend">
@@ -1187,7 +1187,7 @@
               </div>
             </div>
             <div class="box" id="conv" aria-label="成交转化率趋势折线图">
-              __CONV_CHART__
+              <!-- 由前端 svgConvChart 渲染 -->
             </div>
           </section>
         </div>
@@ -2483,7 +2483,7 @@
             const rows = shoptable.querySelectorAll("tr.total-row");
             const thH = th0 ? th0.offsetHeight : 35;
             rows.forEach((tr) => {
-              const prev = tr.previousElementSibling;
+              let prev = tr.previousElementSibling;
               let top = thH;
               while (prev && prev.classList.contains("total-row")) {
                 top += prev.offsetHeight;

@@ -197,10 +197,6 @@ class Handler(SimpleHTTPRequestHandler):
                 "detail": row[4], "current": row[5], "previous": row[6], "change": row[7],
             })
 
-        charts = {}
-        for row in con.sql("SELECT * FROM charts").fetchall():
-            charts.setdefault(row[0], {})[row[1]] = row[2]
-
         opt = {}
         for k, v in {r[0]: r[1] for r in con.sql("SELECT * FROM optimization").fetchall()}.items():
             parts = k.split(".")
@@ -220,7 +216,7 @@ class Handler(SimpleHTTPRequestHandler):
             "overall": overall, "shopDaily": shop_daily,
             "categories": categories, "topSkus": top_skus,
             "movers": movers, "alerts": alerts,
-            "quality": quality, "charts": charts, "cityStock": city_stock, "moduleFilters": json.loads(meta.get("moduleFilters", "{}")), "targets": json.loads(meta.get("targets", "{}")),
+            "quality": quality, "cityStock": city_stock, "moduleFilters": json.loads(meta.get("moduleFilters", "{}")), "targets": json.loads(meta.get("targets", "{}")),
             "optimization": opt,
         }
 
