@@ -144,13 +144,14 @@ sales-report/
 ├── templates/                     # ★ Vercel Root Directory
 │   ├── index.html                 # 轻量 HTML（运行时 fetch /api/data）
 │   ├── all_shop_template.html     # HTML 模板源码（.vercelignore 排除）
-│   ├── server.py                  # 本地开发服务器（.vercelignore 排除）
+│   ├── server.py                  # 本地开发服务器（.vercelignore 排除；/api/data 与线上共用 api/data_common.py）
 │   ├── vercel.json                # builds + routes（Flask function + static）
 │   ├── _redirects                 # SPA fallback
 │   ├── .vercelignore              # 部署排除规则
 │   ├── favicon.ico / .png
 │   └── api/
-│       ├── data.py                # Flask Function（app + /api/data 路由）
+│       ├── data.py                # Flask Function（薄壳：app + /api/data 路由，组装逻辑在 data_common）
+│       ├── data_common.py         # ★ DuckDB→JSON 统一读取实现（本地/线上共用，唯一权威）
 │       ├── requirements.txt       # flask + duckdb
 │       ├── report.duckdb          # ★ 函数打包读取的库（构建后自动同步）
 │       └── data/report.duckdb     # 构建主输出（11 张表，含 city_stock 城市库存）
@@ -312,6 +313,7 @@ python3 -c "import duckdb; print('ok')"   # 能打印 ok 即可正常启动
 
 | 日期 | Commit | 阶段 | 内容 |
 |------|--------|------|------|
+| 2026-10-23 | 本次 | **本地/线上 API 统一：提取 data_common 公共模块** | `/api/data` 原有本地 server.py 与线上 api/data.py 两套并行实现，已发生实际漂移：`moduleFilters` 只在本地透出（线上白名单不生效）、本地 `SELECT *` 按列序取值存在错位隐患、movers 分组写法不同。现提取 `templates/api/data_common.py`（纯标准库，唯一权威实现），两入口改为薄壳复用；白名单功能线上随即生效。Playwright 验证：本地服务 JSON 键完整、白名单生效、无 JS 错误 |
 | 2026-10-23 | 本次 | **代码清理：移除 charts 死链路 + 小计吸顶修复** | **① charts 死链路删除**：后端 SVG 趋势图（svg_gmv_chart/svg_conversion_chart，63 行）自前端内置渲染器上线后已无消费方，但仍在每次构建时为全部/各平台/各店铺生成并存入 DuckDB `charts` 表、经两个 API 入口透出（含巨大 SVG 字符串）。全链路删除：构建不再生成、`charts` 表不再建、`server.py`/`api/data.py` 不再读取透出。效果：db 8.1MB→7.4MB，API 响应显著减小，构建少做无用渲染<br>**② 小计吸顶偏移修复（存量 bug）**：店铺表现表合计行偏移计算 `const prev` 被重复赋值，抛 `Assignment to constant variable` 中断后续偏移计算，改为 `let`；Playwright 验证京东自营视图 total-row 偏移正确、全页无 JS 错误<br>**③ 微小清理**：删除无引用的 `config.INPUT` 兼容别名；README 配置表补 `notify.local.json`（Bark）条目 |
 | 2026-10-23 | `4ac9c60` | **代码审查修复 + 城市预警白名单 + Bark 推送** | **① 审查修复 4 项**：横版城市库存解析补全国口径（`全国现货库存`/`全国采购在途数量` 候选列、`natTransit`/`natOutYesterday`/`natOut7d` 输出对齐纵版；顺带修复数值转换误伤「是否售完即止」列导致售完过滤失效）；同日多份城市库存文件由静默覆盖改为覆盖+警告；「导出日报图」补克隆内 sticky 解除（滚动后截图错位），月报图补 `.group-head` 解除；`server.py` 改 `read_only=True` 打开 DuckDB（构建与预览可并行，不再锁冲突）<br>**② 横版真实文件落实**：采购在途候选列名以真实横版导出为准（`全国采购在途数量`），380 行 × 2278 列全量回归通过，抽样取值与源表一致，售完即止 118 SKU 全部过滤<br>**③ 城市预警白名单生效**：`cityTable()` 接入 `MODULE_SHOPS_FILTER.city_alert`（white 非空仅展示名单内店铺、black 始终排除、单选不在名单隐藏整模块）；此前白名单仅入库未消费，展示范围与配置不符<br>**④ Bark 推送**：构建完成后按平台+店铺推送日报更新情况（每店 GMV 或「未更新」，开业前店铺跳过，失败仅警告不影响构建）；Key 存 `scripts/notify.local.json`（git-ignored、权限 600，与 multi-platform-export 同格式互拷），`BARK_URL` 环境变量可覆盖，未配置则不推送<br>**⑤ README**：数据源目录补 iCloud 实体路径与符号链接说明；本地预览命令大小写修正；故障排查表补「构建与预览可并行」 |
 | 2026-09-24 | `e06797e` | **项目立项** | 京东 POP 6 店销售日报从零搭建：DuckDB + Vercel Serverless（Flask）架构；`build_all_shop_daily.py` 构建入库（10 张表：meta/quality/overall/shop_daily/categories 等）；前端 12 个模块（KPI、GMV 归因、7日优化研究、趋势、店铺表现、类目、TOP SKU、升降榜、预警、总览、数据质量、三级筛选）；配套 docs（OPTIMIZATION/USAGE/VERCEL_DEPLOY）、启动脚本、favicon |

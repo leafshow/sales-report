@@ -1,36 +1,51 @@
-"""Vercel Serverless Function — 从 DuckDB 读取数据返回 JSON（Flask 入口）"""
-import json
+"""Vercel Serverless Function — 从 DuckDB 读取数据返回 JSON（Flask 入口）。
+
+数据组装逻辑在 api/data_common.py（与本地 server.py 共用），本文件只是 Flask 壳。
+"""
+import sys
 from pathlib import Path
 
-from flask import Flask, jsonify, Response, request
+from flask import Flask, Response, request
 
-DB_PATH = Path(__file__).parent / "data" / "report.duckdb"
+# Vercel 打包后 api/ 不一定是包；把函数目录加入 sys.path 保证能 import data_common
+sys.path.insert(0, str(Path(__file__).parent))
+from data_common import connect, find_db, load_data  # noqa: E402
 
 app = Flask(__name__)
 
 
 def _find_db():
-    """Vercel 上 includeFiles 可能把文件放在函数根或 api/ 下，逐个探测"""
-    here = Path(__file__).parent
-    for p in [here / "data" / "report.duckdb", here / "report.duckdb",
-              here.parent / "data" / "report.duckdb"]:
-        if p.exists():
-            return p
-    return here / "data" / "report.duckdb"
+    return find_db(Path(__file__).parent)
 
 
 def _load_con():
     try:
-        import duckdb
+        import duckdb  # noqa: F401
     except ImportError:
         return None, "duckdb module not installed"
     db_path = _find_db()
     if not db_path.exists():
         return None, f"database not found at {db_path}"
     try:
-        return duckdb.connect(str(db_path), read_only=True), None
-    except duckdb.Error:
-        return None, f"cannot open database (read-only fs): {db_path}"
+        return connect(db_path), None
+    except Exception:
+        return None, "cannot open database (read-only fs)"
+
+
+def _resp(code, obj):
+    return Response(
+        json.dumps(obj, ensure_ascii=False) if isinstance(obj, dict) else obj,
+        status=code,
+        mimetype="application/json",
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type",
+        },
+    )
+
+
+import json  # noqa: E402
 
 
 @app.route("/api/data", methods=["GET", "OPTIONS"])
@@ -41,153 +56,8 @@ def handler():
     if err:
         return _resp(404, {"error": err})
     try:
-        # meta
-        meta_rows = {r[0]: r[1] for r in con.sql("SELECT key,value FROM meta").fetchall()}
-        # quality
-        qual_rows = {r[0]: r[1] for r in con.sql("SELECT key,value FROM quality").fetchall()}
-        quality = {}
-        for k, v in qual_rows.items():
-            if v in ("true", "false"):
-                quality[k] = v == "true"
-            elif v in ("True", "False"):
-                quality[k] = v == "True"
-            else:
-                try:
-                    quality[k] = json.loads(v) if isinstance(v, str) else v
-                except (json.JSONDecodeError, ValueError):
-                    try:
-                        quality[k] = float(v)
-                    except (ValueError, TypeError):
-                        quality[k] = v
-        shops = json.loads(meta_rows.get("shops", "[]"))
-        dates = json.loads(meta_rows.get("dates", "[]"))
-        shop_display = {s["raw"]: s["display"] for s in shops}
-
-        # overall
-        overall = []
-        for row in con.sql("""SELECT date,shop_count,sku_count,gmv,units,orders,buyers,visitors,
-                   conversion,aov,uv_value,add_cart_users,refund_amount,refund_rate,baseline,week
-                   FROM overall ORDER BY date""").fetchall():
-            rec = {"date": row[0], "shopCount": row[1], "skuCount": row[2], "gmv": row[3],
-                   "units": row[4], "orders": row[5], "buyers": row[6], "visitors": row[7],
-                   "conversion": row[8], "aov": row[9], "uvValue": row[10],
-                   "addCartUsers": row[11], "refundAmount": row[12], "refundRate": row[13]}
-            rec["baseline"] = json.loads(row[14]) if row[14] else None
-            rec["week"] = json.loads(row[15]) if row[15] else None
-            overall.append(rec)
-
-        # shop_daily
-        shop_daily = {}
-        for row in con.sql("""SELECT date,shop,sku_count,gmv,units,orders,buyers,visitors,
-                   conversion,aov,uv_value,refund_amount,refund_rate,baseline,week,
-                   gmv_outbound,units_outbound,stock_value,out30d_value,out_mtd_value
-                   FROM shop_daily ORDER BY date""").fetchall():
-            rec = {"date": row[0], "shopRaw": row[1], "shopDisplay": shop_display.get(row[1], row[1]), "skuCount": row[2], "gmv": row[3],
-                   "units": row[4], "orders": row[5], "buyers": row[6], "visitors": row[7],
-                   "conversion": row[8], "aov": row[9], "uvValue": row[10],
-                   "refundAmount": row[11], "refundRate": row[12]}
-            rec["baseline"] = json.loads(row[13]) if row[13] else None
-            rec["week"] = json.loads(row[14]) if row[14] else None
-            rec["gmvOutbound"] = row[15]
-            rec["unitsOutbound"] = row[16]
-            rec["stockValue"] = row[17]
-            rec["out30dValue"] = row[18];rec["outMtdValue"] = row[19]
-            shop_daily.setdefault(row[1], []).append(rec)
-
-        # categories
-        categories = {}
-        for row in con.sql("""SELECT date,path,l1,l2,l3,gmv,units,orders,sku_count,visitors,refund_amount,gmv_outbound
-                   FROM categories ORDER BY date""").fetchall():
-            categories.setdefault(row[0], []).append({
-                "path": row[1], "shopRaw": row[1].split("/")[0], "l1": row[2], "l2": row[3], "l3": row[4],
-                "category1": row[2], "category2": row[3], "category3": row[4],
-                "gmv": row[5], "units": row[6], "orders": row[7],
-                "skuCount": row[8], "visitors": row[9], "refundAmount": row[10], "gmvOutbound": row[11]})
-
-        # top_skus
-        top_skus = {}
-        for row in con.sql("""SELECT date,shop,sku,name,gmv,units,visitors,conversion,uv_value,refund_amount,gmv_outbound
-                   FROM top_skus ORDER BY date,gmv DESC""").fetchall():
-            top_skus.setdefault(row[0], []).append({
-                "shopRaw": row[1], "shopDisplay": shop_display.get(row[1], row[1]), "sku": row[2], "name": row[3],
-                "gmv": row[4], "units": row[5], "visitors": row[6],
-                "conversion": row[7], "uvValue": row[8], "refundAmount": row[9], "gmvOutbound": row[10]})
-
-        # city_stock（头部SKU主要城市库存，含预警级别）
-        city_stock = {}
-        for row in con.sql("SELECT date,shop,sku,name,city,stock,daily_avg,days_cover,out_yesterday,out_7d,nat_stock,nat_days_cover,price,nat_transit,nat_out_yesterday,nat_out_7d FROM city_stock ORDER BY date,shop,sku,city").fetchall():
-            days=row[7]
-            if days is None:
-                level="unknown"
-            elif days<1:
-                level="critical"
-            elif days<3:
-                level="warn"
-            else:
-                level="ok"
-            city_stock.setdefault(row[0], []).append({
-                "shopRaw": row[1], "shopDisplay": shop_display.get(row[1], row[1]),
-                "sku": row[2], "name": row[3], "city": row[4],
-                "stock": row[5], "dailyAvg": row[6], "daysCover": days, "level": level,
-                "outYesterday": row[8], "out7d": row[9], "natStock": row[10],
-                "natDaysCover": row[11], "price": row[12], "natTransit": row[13],
-                "natOutYesterday": row[14], "natOut7d": row[15]})
-
-        # movers
-        movers = {}
-        for row in con.sql("""SELECT date,type,shop,sku,name,previous_gmv,gmv,delta
-                   FROM movers ORDER BY date""").fetchall():
-            key = row[1] + "s" if row[1] in ("riser", "faller") else row[1]
-            movers.setdefault(row[0], {}).setdefault(key, []).append({
-                "shopRaw": row[2], "shopDisplay": shop_display.get(row[2], row[2]), "sku": row[3], "name": row[4],
-                "previousGmv": row[5], "gmv": row[6], "delta": row[7]})
-
-        # alerts
-        alerts = {}
-        for row in con.sql("""SELECT date,level,scope,type,detail,current,previous,change
-                   FROM alerts ORDER BY date""").fetchall():
-            alerts.setdefault(row[0], []).append({
-                "level": row[1], "scope": row[2], "type": row[3],
-                "detail": row[4], "current": row[5], "previous": row[6], "change": row[7]})
-
-        # optimization
-        opt_rows = {r[0]: r[1] for r in con.sql("SELECT key,value FROM optimization").fetchall()}
-        optimization = {}
-        for k, v in opt_rows.items():
-            parts = k.split(".")
-            d = optimization
-            for p in parts[:-1]:
-                d = d.setdefault(p, {})
-            try:
-                d[parts[-1]] = json.loads(v) if isinstance(v, str) and v not in ("true", "false") else v
-            except (json.JSONDecodeError, ValueError):
-                try:
-                    d[parts[-1]] = float(v)
-                except (ValueError, TypeError):
-                    d[parts[-1]] = v
-
-        result = {
-            "generatedAt": meta_rows.get("generatedAt", ""),
-            "sourceDir": meta_rows.get("sourceDir", "多平台导出（京东商智 + 唯品会 + 拼多多）"),
-            "shops": shops, "platforms": json.loads(meta_rows.get("platforms", '{"jd":"京东","vip":"唯品会"}')), "dates": dates,
-            "overall": overall, "shopDaily": shop_daily,
-            "categories": categories, "topSkus": top_skus,
-            "movers": movers, "alerts": alerts,
-            "quality": quality, "cityStock": city_stock, "targets": json.loads(meta_rows.get("targets", "{}")) if isinstance(meta_rows.get("targets", "{}"), str) else (meta_rows.get("targets") or {}),
-            "optimization": optimization,
-        }
-        return _resp(200, result)
+        return _resp(200, load_data(con))
+    except Exception as e:
+        return _resp(500, {"error": str(e)})
     finally:
         con.close()
-
-
-def _resp(status_code, body):
-    resp = Response(
-        json.dumps(body, ensure_ascii=False) if body is not None else "",
-        status=status_code,
-        mimetype="application/json",
-    )
-    resp.headers["Access-Control-Allow-Origin"] = "*"
-    resp.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
-    resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
-    return resp
