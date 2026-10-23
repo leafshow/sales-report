@@ -94,9 +94,11 @@ class Handler(SimpleHTTPRequestHandler):
             self._json_response(404, {"error": "report.duckdb not found, run build script first"})
             return
         try:
-            con = duckdb.connect(str(DB_PATH))
-            data = self._load_data(con)
-            con.close()
+            con = duckdb.connect(str(DB_PATH), read_only=True)
+            try:
+                data = self._load_data(con)
+            finally:
+                con.close()
             self._json_response(200, data)
         except Exception as e:
             print(f"ERROR: {e}", file=sys.stderr, flush=True)

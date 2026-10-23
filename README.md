@@ -13,7 +13,7 @@
 │ index.html   │ ──────────────→│ api/data.py      │─────────────→│ report.duckdb  │
 │   ~127KB      │←──── JSON ─────│ (Flask Function) │←──read_only──│   ~7.3MB       │
 └──────────────┘                └──────────────────┘              └────────────────┘
-      数据源: ~/Desktop/Platform-Date/{JD,VIP,PDD}/Import + {JD_SELF}/*.xlsx|csv
+      数据源: ~/Desktop/Platform-Date/*（符号链接 → iCloud 云盘，见「数据源目录」）
              └── scripts/build_all_shop_daily.py 构建入库 ──┘
 ```
 
@@ -109,6 +109,7 @@ python3 scripts/build_all_shop_daily.py
 - **落库**：DuckDB 表 `city_stock(date, shop, sku, name, city, stock, daily_avg, days_cover, out_yesterday, out_7d, nat_stock, nat_days_cover, nat_transit, nat_out_yesterday, nat_out_7d, price)`。
 - **预警分级**：`days_cover = 城市库存 ÷ SKU近7日日均出库`；<1 天 → 断货风险（红），1~3 天 → 偏低（黄），≥3 天 → 正常，无出库 → unknown。
 - **全国口径**：`nat_stock` = `RDC=全国` 行现货库存件数；`nat_days_cover` = 全国库存 ÷ 全国行近7日日均出库；`nat_transit` = 全国行采购在途数量；`nat_out_yesterday` / `nat_out_7d` = 全国行昨日/近7日出库件数（无全国行的 SKU 以分仓合计兜底，该导出格式下两者一致）。
+- **展示范围**：模块店铺白名单 `MODULE_SHOPS_FILTER.city_alert`（`white` 非空时仅展示名单内店铺，`black` 始终排除；单选店铺不在名单内时整个模块隐藏）。数据层全店铺解析入库，展示层按白名单裁剪。
 - **前端**：「头部商品城市库存预警」表格（仅京东自营视图可见）：一行一个 SKU，横向展示 8 城市库存/覆盖天数，附采购价、昨出库、近7日出库（以上三项均为全国行口径）、全国库存、采购在途与全国覆盖天数；按最差城市覆盖天数升序排列，风险格着色。
 - **口径注意**：个别日期导出未勾选城市字段时该日数据缺失显示 —；头部 SKU 按全表昨日出库选取，落在无出库店铺分组的行 `days_cover` 为 null（unknown）。
 
@@ -194,7 +195,7 @@ git commit -m "report $(date +%m-%d)" && git push
 
 ```bash
 conda activate      #开启虚拟环境
-Python3 templates/server.py    #本地构建
+python3 templates/server.py    # 启动本地预览服务器
 # 浏览器打开 http://127.0.0.1:8081（强刷 Cmd+Shift+R）
 # ⚠️ 不要直接双击 HTML，必须通过 http:// 访问
 ```
@@ -218,7 +219,7 @@ python3 -c "import duckdb; print('ok')"   # 能打印 ok 即可正常启动
 |------|------|------|
 | 页面无任何数据/店铺 | 启动用的 Python 未装 duckdb（典型：Xcode Python 3.9） | 按上述自检换 conda Python 重启 |
 | 启动报端口占用（Address already in use） | 8081 已有 server.py 进程（可能上次未退出） | `lsof -iTCP:8081 -sTCP:LISTEN` 查 PID，`kill <PID>` 后重启，或直接复用现有进程 |
-| 页面数据不是最新 | 构建后未重启/浏览器缓存 | 强刷 Cmd+Shift+R（server.py 已带 no-cache 头，一般无需） |
+| 页面数据不是最新 | 构建后未重启/浏览器缓存 | 强刷 Cmd+Shift+R（server.py 已带 no-cache 头，一般无需；server.py 以 read_only 打开数据库，构建与预览可并行） |
 | API 正常但页面报 fetch 失败 | 用 `file://` 双击打开了 HTML | 必须走 `http://127.0.0.1:8081` |
 
 **验证 API**：`curl -s http://127.0.0.1:8081/api/data | head -c 200` —— 返回 JSON（含 `generatedAt`/`shops` 等字段）即正常；返回 `{"error": ...}` 按上表排查。
@@ -226,7 +227,10 @@ python3 -c "import duckdb; print('ok')"   # 能打印 ok 即可正常启动
 
 ### 数据源目录
 
-默认（`scripts/config.py`）：
+数据实体存放于 iCloud 云盘 `~/Library/Mobile Documents/com~apple~CloudDocs/Platform-Date/`（多端同步），
+`~/Desktop/Platform-Date` 为指向该目录的符号链接，代码与文档中的桌面路径均经此链接生效。
+
+默认目录（`scripts/config.py`，环境变量可覆盖）：
 
 | 平台 | 目录 | 环境变量覆盖 |
 |------|------|--------------|
@@ -299,7 +303,7 @@ python3 -c "import duckdb; print('ok')"   # 能打印 ok 即可正常启动
 | 12 | 筛选器 | 平台按钮组（一键点击）+ 日期 + 店铺三级联动；经营结论条（headline）京东自营视图在最前方追加当日出库金额 |
 | 13 | 自营双口径 KPI | 京东自营专属：成交销售额/出库金额/可用库存额/近30日出库额/库存周转率/库存周转天数/出库件数/零售出库比 |
 | 14 | 自营库存健康 | 京东自营专属：按店铺展示库存额与周转状态 |
-| 15 | 头部商品城市库存预警 | 京东自营专属：TOP20 SKU × 7 主要 RDC 城市现货库存横向矩阵，覆盖天数预警分级（<1天断货红 / 1~3天偏低黄），按最差城市排序 |
+| 15 | 头部商品城市库存预警 | 京东自营专属：TOP20 SKU × 8 主要 RDC 城市现货库存横向矩阵，覆盖天数预警分级（<1天断货红 / 1~3天偏低黄），按最差城市排序；展示范围受 `MODULE_SHOPS_FILTER.city_alert` 白名单控制 |
 
 ---
 
@@ -307,6 +311,7 @@ python3 -c "import duckdb; print('ok')"   # 能打印 ok 即可正常启动
 
 | 日期 | Commit | 阶段 | 内容 |
 |------|--------|------|------|
+| 2026-10-23 | 本次 | **代码审查修复 + 城市预警白名单 + Bark 推送** | **① 审查修复 4 项**：横版城市库存解析补全国口径（`全国现货库存`/`全国采购在途数量` 候选列、`natTransit`/`natOutYesterday`/`natOut7d` 输出对齐纵版；顺带修复数值转换误伤「是否售完即止」列导致售完过滤失效）；同日多份城市库存文件由静默覆盖改为覆盖+警告；「导出日报图」补克隆内 sticky 解除（滚动后截图错位），月报图补 `.group-head` 解除；`server.py` 改 `read_only=True` 打开 DuckDB（构建与预览可并行，不再锁冲突）<br>**② 横版真实文件落实**：采购在途候选列名以真实横版导出为准（`全国采购在途数量`），380 行 × 2278 列全量回归通过，抽样取值与源表一致，售完即止 118 SKU 全部过滤<br>**③ 城市预警白名单生效**：`cityTable()` 接入 `MODULE_SHOPS_FILTER.city_alert`（white 非空仅展示名单内店铺、black 始终排除、单选不在名单隐藏整模块）；此前白名单仅入库未消费，展示范围与配置不符<br>**④ Bark 推送**：构建完成后按平台+店铺推送日报更新情况（每店 GMV 或「未更新」，开业前店铺跳过，失败仅警告不影响构建）；Key 存 `scripts/notify.local.json`（git-ignored、权限 600，与 multi-platform-export 同格式互拷），`BARK_URL` 环境变量可覆盖，未配置则不推送<br>**⑤ README**：数据源目录补 iCloud 实体路径与符号链接说明；本地预览命令大小写修正；故障排查表补「构建与预览可并行」 |
 | 2026-09-24 | `e06797e` | **项目立项** | 京东 POP 6 店销售日报从零搭建：DuckDB + Vercel Serverless（Flask）架构；`build_all_shop_daily.py` 构建入库（10 张表：meta/quality/overall/shop_daily/categories 等）；前端 12 个模块（KPI、GMV 归因、7日优化研究、趋势、店铺表现、类目、TOP SKU、升降榜、预警、总览、数据质量、三级筛选）；配套 docs（OPTIMIZATION/USAGE/VERCEL_DEPLOY）、启动脚本、favicon |
 | 2026-09-24 | `cb26833` `3201a0d` | **首次部署** | 提交 5MB `report.duckdb` 完成首次 Git 部署；调整 `rootDirectory=templates` 触发线上生效 |
 | 2026-09-24 | `df63318` | **部署修复** | Vercel 新版 Python runtime 不再支持裸 `handler`，改为 Flask `app` 入口；duckdb 连接改 `read_only=True` 适配只读文件系统；`vercel.json` 补 `builds` + `routes`；API 200 OK |

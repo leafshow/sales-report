@@ -2924,11 +2924,23 @@
             sec.hidden = true;
             return;
           }
+          /* 模块店铺白名单（config.MODULE_SHOPS_FILTER.city_alert）：white 非空时仅展示名单内店铺，
+             black 始终排除；单选店铺不在名单内时整个模块隐藏 */
+          const mf = (DATA.moduleFilters || {})["city_alert"] || {};
+          const inList = (raw) =>
+            !(mf.black || []).includes(raw) &&
+            (!(mf.white || []).length || (mf.white || []).includes(raw));
+          if (state.shop !== "ALL" && !inList(state.shop)) {
+            sec.hidden = true;
+            return;
+          }
           sec.hidden = false;
           const rows = (
             (DATA.cityStock && DATA.cityStock[state.date]) ||
             []
-          ).filter((x) => state.shop === "ALL" || x.shopRaw === state.shop);
+          ).filter(
+            (x) => inList(x.shopRaw) && (state.shop === "ALL" || x.shopRaw === state.shop),
+          );
           const CITIES = [
             "北京",
             "上海",
@@ -3309,7 +3321,7 @@
               document.getElementById("shoptable").cloneNode(true),
             );
             /* 解除克隆内吸顶：html2canvas 按页面滚动位置绘制 sticky 元素会错位 */
-            shot.querySelectorAll("th, tr.total-row").forEach((el) => {
+            shot.querySelectorAll("th, tr.total-row, tr.group-head td").forEach((el) => {
               el.style.position = "static";
               el.style.top = "auto";
             });
@@ -3385,6 +3397,11 @@
               if (skuHead) shot.append(skuHead.cloneNode(true));
               if (skuTable) shot.append(skuTable.cloneNode(true));
             }
+            /* 解除克隆内吸顶：html2canvas 按页面滚动位置绘制 sticky 元素会错位（与月报图导出同因） */
+            shot.querySelectorAll("th, tr.total-row, tr.group-head td").forEach((el) => {
+              el.style.position = "static";
+              el.style.top = "auto";
+            });
             const canvas = await html2canvas(shot, {
               backgroundColor: "#fff",
               scale: 2,

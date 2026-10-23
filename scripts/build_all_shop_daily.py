@@ -26,6 +26,51 @@ SHOP_META     = {f"{k[0]}|{k[1]}": v for k, v in config.SHOPS_VISIBLE.items()}  
 SHOP_PLATFORM = {f"{k[0]}|{k[1]}": k[0] for k in SHOPS}
 HIDDEN_SHOPS  = config.HIDDEN_SHOPS   # 隐藏店铺：仍解析入库存数据，但不参与聚合与展示
 SHOP_START_DATES = config.SHOP_START_DATES  # 店铺数据起始日期：早于此的空报表不告警（开业前正常形态）
+def _bark_notify(data):
+    """构建完成后通过 Bark 推送各平台店铺日报更新情况。
+    推送内容：每平台一段，按店铺列出最新日期 GMV；当日无数据的店铺标「未更新」；
+    开业前（早于 shop_start_dates）店铺不列。失败仅打印警告，不影响构建结果。"""
+    base = (config.BARK_URL or "").rstrip("/")
+    if not base:
+        return
+    import urllib.request, urllib.parse
+    latest = data["quality"]["latestAvailableDate"]
+    sd = SHOP_START_DATES
+    by_plat = defaultdict(list)
+    for key in SHOP_META:  # 仅可见店铺，按注册顺序
+        plat = key.split("|", 1)[0]
+        rows = data["shopDaily"].get(key, [])
+        row = next((r for r in rows if r["date"] == latest), None)
+        if row is None and sd.get(key) and latest < sd[key]:
+            continue  # 开业前：正常无数据，不推送
+        disp = SHOP_META[key][0]
+        by_plat[plat].append(f"{disp}: " + (f"¥{row['gmv']:,.0f}" if row else "未更新"))
+    if not any(by_plat.values()):
+        return
+    plat_names = PLATFORMS
+    lines = [f"📅 {latest} 日报更新"]
+    for plat in PLATFORM_DIRS:
+        if plat not in by_plat:
+            continue
+        lines.append(f"— {plat_names.get(plat, plat)} —")
+        lines.extend(by_plat[plat])
+    missing = len(data["quality"].get("missingDates", []))
+    if missing:
+        lines.append(f"⚠️ 缺失日期: {missing} 天")
+    body = "\n".join(lines)
+    try:
+        qs = urllib.parse.urlencode({
+            "title": f"日报 {latest}",
+            "body": body,
+            "group": "shop-daily",
+            "icon": "https://vercel.com/icon",
+        })
+        url = f"{base}/push?{qs}"
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            print(f"🔔 Bark 推送完成: {resp.status}")
+    except Exception as e:
+        print(f"⚠️  Bark 推送失败（不影响构建）: {e}")
 def _record_empty(q, shop_key, shop_name, date, fname):
     """记录空报表；店铺开业前（早于 shop_start_dates.json 起始日期）的空表为正常形态，不告警"""
     sd = SHOP_START_DATES.get(shop_key, "")
@@ -185,13 +230,21 @@ def jdself_city_stock(path, date):
     out_col="全国昨日出库商品件数" if "全国昨日出库商品件数" in head.columns else "昨日出库商品件数"
     w7_col="全国近7日出库商品件数" if "全国近7日出库商品件数" in head.columns else "近7日出库商品件数"
     need=["SKU","商品名称","店铺名称","全国采购价",out_col,w7_col]+list(stock_cols.values())
+    if "全国现货库存" in head.columns:
+        need.append("全国现货库存")
+    for c in ("全国采购在途数量","采购在途数量","采购在途"):
+        if c in head.columns:
+            need.append(c)
+            nat_transit_col=c
+            break
     if "是否售完即止" in head.columns:
         need.append("是否售完即止")
     df=pd.read_excel(path, usecols=[c for c in need if c in head.columns])
     if len(df)==0 or out_col not in df.columns:
         return {}
+    non_num_cols={"SKU","商品名称","店铺名称","是否售完即止"}
     for c in df.columns:
-        if c not in ("SKU","商品名称","店铺名称"):
+        if c not in non_num_cols:
             df[c]=pd.to_numeric(df[c], errors="coerce").fillna(0.0)
     df["_shop"]=df["店铺名称"].fillna("未分配").astype(str).str.strip()
     if "是否售完即止" in df.columns:
@@ -204,6 +257,7 @@ def jdself_city_stock(path, date):
         for _,r in top.iterrows():
             avg7=float(r.get(w7_col,0))/7.0
             nat_stock=float(r.get("全国现货库存",0) or 0)
+            nat_transit=float(r.get(nat_transit_col,0) or 0) if nat_transit_col else 0.0
             nat_days=round(nat_stock/avg7,1) if avg7>0 else None
             for city,col in stock_cols.items():
                 st=float(r[col])
@@ -213,6 +267,9 @@ def jdself_city_stock(path, date):
                              "outYesterday":float(r.get(out_col,0) or 0),
                              "out7d":float(r.get(w7_col,0) or 0),
                              "natStock":nat_stock,"natDaysCover":nat_days,
+                             "natTransit":nat_transit,
+                             "natOutYesterday":float(r.get(out_col,0) or 0),
+                             "natOut7d":float(r.get(w7_col,0) or 0),
                              "price":float(r.get("全国采购价",0) or 0)})
         if rows:
             result[shop]={"date":date,"rows":rows}
@@ -718,14 +775,20 @@ def build(plat_only=None, force=False):
             if kind == "city":
                 try:
                     cs=jdself_city_stock_auto(f, date)
-                    if cs: city_stock[date]=cs
+                    if cs:
+                        if date in city_stock:
+                            print(f"⚠️  同日多份城市库存文件，{f.name} 覆盖已有数据")
+                        city_stock[date]=cs
                 except Exception as e:
                     print(f"⚠️  城市库存解析失败 {f.name}: {e}")
             elif kind == "inventory":
                 inv = jdself_inventory_metrics(f, date)  # 同日多份时后者覆盖（正常仅一份）
                 try:
                     cs=jdself_city_stock_auto(f, date)
-                    if cs: city_stock[date]=cs
+                    if cs:
+                        if date in city_stock:
+                            print(f"⚠️  同日多份城市库存文件，{f.name} 覆盖已有数据")
+                        city_stock[date]=cs
                 except Exception as e:
                     print(f"⚠️  城市库存解析失败 {f.name}: {e}")
             elif kind == "rank":
@@ -1341,3 +1404,4 @@ if __name__=="__main__":
         print(f"同步: {api_db}")
     print(OUT); print(json.dumps(data["quality"],ensure_ascii=False,indent=2))
     print(f"latest={latest['date']} gmv={latest['gmv']:.2f} html_size={OUT.stat().st_size} db_size={config.DB_PATH.stat().st_size}")
+    _bark_notify(data)

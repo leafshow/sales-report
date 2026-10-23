@@ -208,6 +208,20 @@ def _load_start_dates():
         return {}
 SHOP_START_DATES = _load_start_dates()
 
+# ── Bark 推送（构建完成后按平台+店铺推送日报更新情况）─────────────────────────
+# Key 存于 scripts/notify.local.json（git-ignored，权限 600，与 multi-platform-export 同格式）：
+#   {"bark_key": "YOUR_KEY", "bark_server": "https://api.day.app"}
+# 也支持环境变量 BARK_URL 覆盖（填到 Key 为止）；两者都没有 = 不推送
+def _load_bark():
+    import json as _json
+    try:
+        cfg = _json.loads((Path(__file__).parent / 'notify.local.json').read_text(encoding='utf-8'))
+        key, server = cfg.get('bark_key', ''), cfg.get('bark_server', 'https://api.day.app')
+        return f"{server.rstrip('/')}/{key}" if key else ''
+    except Exception:
+        return ''
+BARK_URL = os.environ.get('BARK_URL', '') or _load_bark()
+
 # 生效店铺列表 = SHOPS - 隐藏店铺 - 隐藏平台店铺（保持注册顺序）
 SHOPS_VISIBLE = {
     k: v for k, v in SHOPS.items()
