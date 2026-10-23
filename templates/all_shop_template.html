@@ -1334,7 +1334,7 @@
     </div>
     <script>
       let DATA = {};
-      /* 补单金额（店长手工填写）：从 /api/budan 或 /budan.json 载入；结构 {shopRaw:{YYYY-MM:金额}} */
+      /* 销售调整（店长手工填写，正=线下补录加回，负=异常销售剔除）：从 /api/budan 或 /budan.json 载入；结构 {shopRaw:{YYYY-MM-DD:金额}} */
       let BUDAN = {};
       const budanReady = fetch("/api/budan")
         .then((r) => (r.ok ? r.json() : Promise.reject()))
@@ -2175,7 +2175,7 @@
           const b = budanMonth(c.shopRaw, ym);
           return (m - b) / t[ym];
         }
-        /* 补单金额读取：BUDAN[shopRaw][date]（按天），未填返回 0 */
+        /* 销售调整读取：BUDAN[shopRaw][date]（按天），未填返回 0；正=加回，负=剔除 */
         function budanOf(shopRaw, date) {
           return ((BUDAN[shopRaw] || {})[date] || 0) * 1;
         }
@@ -2240,15 +2240,15 @@
           const pct = (v) => Math.min(v * 100, 100).toFixed(1) + "%";
           const bar = (v, c) =>
             `<div class="mt-bar"><div class="fill" style="width:${pct(v)};background:${c}"></div></div>`;
-          const mtdNet = mtdHas ? mtdSum - budanSum : null; /* 扣减补单后的月至今净额 */
+          const mtdNet = mtdHas ? mtdSum - budanSum : null; /* 销售调整后月至今净额：调整值为净额（正加负减） */
           return `<div class="mt-row">
-                  <div class="mt-card"><div class="label">月至今销售金额</div><div class="value">${mtdNet != null ? M2(mtdNet) : "-"}</div><div class="sub">${ym} · 自营按出库口径${budanSum > 0 ? " · 已扣补单" : ""}</div></div>
+                  <div class="mt-card"><div class="label">月至今销售金额</div><div class="value">${mtdNet != null ? M2(mtdNet) : "-"}</div><div class="sub">${ym} · 自营按出库口径${budanSum !== 0 ? " · 含销售调整" : ""}</div></div>
                   <div class="mt-card"><div class="label">月任务额</div><div class="value">${M2(target)}</div><div class="sub">${shopsIn.length} 店合计</div></div>
                   <div class="mt-card"><div class="label">达成率</div><div class="value" style="color:${col(rate)}">${(rate * 100).toFixed(1)}%</div>${bar(rate, col(rate))}<div class="sub">进度线 ${(prog * 100).toFixed(1)}%</div></div>
                   <div class="mt-card"><div class="label">时间进度</div><div class="value">${(prog * 100).toFixed(1)}%</div>${bar(prog, "#5c7080")}<div class="sub">${last.getDate()}/${dim} 天</div></div>
                 </div>`;
         }
-        /* 补单金额保存：POST /api/budan {shopRaw, date, amount}（本地直写 JSON；线上经 GitHub API 回传仓库触发重部署） */
+        /* 销售调整保存：POST /api/budan {shopRaw, date, amount}（本地直写 JSON；线上经 GitHub API 回传仓库触发重部署） */
         async function budanSave(shopRaw, date, amount) {
           const r = await fetch("/api/budan", {
             method: "POST",
@@ -2268,14 +2268,14 @@
           let amount = null;
           if (raw !== "") {
             amount = parseFloat(raw);
-            if (!(amount >= 0)) { el.value = el.dataset.old || ""; alert("补单金额需为非负数字"); return; }
+            if (isNaN(amount)) { el.value = el.dataset.old || ""; alert("销售调整需为数字（正=线下补录，负=异常剔除）"); return; }
           }
           try {
             await budanSave(shop, date, amount);
             render(); /* 重渲染：达成率/月度卡按最新补单值重算 */
           } catch (e) {
             el.value = el.dataset.old || "";
-            alert("补单金额保存失败：" + e.message);
+            alert("销售调整保存失败：" + e.message);
           }
         };
         function shops() {
@@ -2305,7 +2305,7 @@
             sv ? "<th>出库金额</th>" : "",
             sv ? "<th>出库件数</th>" : "",
             "<th>月至今实销金额</th>",
-            "<th>补单金额</th>",
+            "<th title=\"正=线下补录，负=异常剔除\">销售调整</th>",
             "<th>达成率</th>",
             sv ? "<th>可用库存额</th>" : "",
             sv ? "<th>周转天数</th>" : "",
@@ -2431,7 +2431,7 @@
             const stockTd = sv
               ? `<td>${K.stock > 0 ? M2(K.stock) : "-"}</td><td>${K.stock > 0 && K.out30 > 0 ? (K.stock / (K.out30 / 30)).toFixed(1) + " 天" : "-"}</td>`
               : "";
-            const refundAny = g.some((x) => x.refundAmount != null);
+            const refundAny = K.g.some((x) => x.refundAmount != null);
             return `<tr class="total-row sub" data-group="${k}"><td>${label}</td>${outTd}${mtdTd}${stockTd}<td>${M2(K.gmv)}</td><td>-</td><td>-</td><td>-</td><td>${I(K.vis)}</td><td>-</td><td>${K.buy > 0 && K.vis > 0 ? P(K.buy / K.vis) : "-"}</td><td>-</td><td>${K.buy > 0 ? M2(K.gmv / K.buy) : "-"}</td><td>${K.vis > 0 ? M2(K.gmv / K.vis) : "-"}</td><td>${refundAny && K.gmv > 0 ? P(K.s("refundAmount") / K.gmv) : "-"}</td></tr>`;
           };
           const refundAnyAll = cs.some((x) => x.refundAmount != null);
@@ -2447,9 +2447,9 @@
                     const m = mtdSales(c);
                     return m != null ? M2(m - budanMonth(c.shopRaw, (DATA.dates.at(-1) || "").slice(0, 7))) : "-";
                   })()}</td><td>${(() => {
-                    /* 当月补单剔除合计（按天填写于 X月店铺销售总览），此处只读展示 */
+                    /* 当月销售调整合计（净额，正=线下补录，负=异常剔除），只读展示 */
                     const v = budanMonth(c.shopRaw, (DATA.dates.at(-1) || "").slice(0, 7));
-                    return v > 0 ? M2(v) : "-";
+                    return v !== 0 ? `<span style="color:${v > 0 ? "#0f9960" : "#cd4243"}">${M2(v)}</span>` : "-";
                   })()}</td><td>${(() => {
                     const r = targetRate(c);
                     return r != null
@@ -2677,7 +2677,18 @@
                   ).trim();
           }
           const oh = sv ? "<th>出库金额</th><th>出库件数</th>" : "";
-          const bdTh = "<th>补单剔除</th>";
+          /* 销售调整列跟随数据归属：当前视图内店铺当月有调整数据时显示（单店视图始终可编辑） */
+          const ymCur = state.date.slice(0, 7);
+          const visShops =
+            state.shop === "ALL"
+              ? platShops("shop_daily").map((x) => x.raw)
+              : [state.shop];
+          const budanVis = visShops.reduce(
+            (s, r) => s + budanMonth(r, ymCur),
+            0,
+          );
+          const bdVis = state.shop !== "ALL" || budanVis !== 0;
+          const bdTh = bdVis ? `<th title="正=线下补录，负=异常剔除">销售调整</th>` : "";
           document.getElementById("daily-table").innerHTML =
             `<thead><tr><th>日期</th><th>店铺数</th>${oh}<th>GMV</th>${bdTh}<th>成交件数</th><th>单量</th><th>客户数</th><th>访客数</th><th>转化率</th><th>客单价</th><th>UV价值</th><th>退款率</th><th>SKU数</th>${sv ? "<th>可用库存额</th><th>周转天数</th>" : ""}</tr></thead><tbody>${(() => {
               /* 任务按月制定：本表展示当前所选日期所在月份的分天数据，随顶部日期选择器切换 */
@@ -2705,11 +2716,7 @@
                   : [state.shop],
                 ymAll,
               );
-              const ymAll0 = ymAll;
-              const budanMonthTotal = state.shop === "ALL"
-                ? platShops("shop_daily").reduce((s, x) => s + budanMonth(x.raw, ymAll0), 0)
-                : budanMonth(state.shop, ymAll0);
-              const bdTd = `<td>${budanMonthTotal > 0 ? M2(budanMonthTotal) : "-"}</td>`;
+              const bdTd = bdVis ? `<td>${budanVis !== 0 ? `<span style="color:${budanVis > 0 ? "#0f9960" : "#cd4243"}">${M2(budanVis)}</span>` : "-"}</td>` : "";
               const tot = `<tr class="total-row"><td><strong>合计</strong></td><td>${sr.length ? "-" : ""}</td>${sumOc}<td>${ret ? M2(S("gmv")) : "-"}</td>${bdTd}<td>${ret ? I(S("units")) : "-"}</td><td>${ret ? I(S("orders")) : "-"}</td><td>${ret ? I(S("buyers")) : "-"}</td><td>${ret ? I(S("visitors")) : "-"}</td><td>${ret ? P(S("buyers") > 0 && S("visitors") > 0 ? S("buyers") / S("visitors") : 0) : "-"}</td><td>${ret ? M2(S("buyers") > 0 ? S("gmv") / S("buyers") : 0) : "-"}</td><td>${ret ? M2(S("visitors") > 0 ? S("gmv") / S("visitors") : 0) : "-"}</td><td>${ret ? P(S("gmv") > 0 ? S("refundAmount") / S("gmv") : 0) : "-"}</td><td>${ret ? I(sr.reduce((m, x) => Math.max(m, x.skuCount || 0), 0)) : "-"}</td>${
                 sv
                   ? (() => {
@@ -2731,11 +2738,11 @@
                     const oc = sv
                       ? `<td>${M2(x.gmvOutbound)}</td><td>${I(x.unitsOutbound)}</td>`
                       : "";
-                    /* 补单剔除（按天）：单店视图可编辑输入当日剔除额；全部店铺视图显示当日各店合计只读 */
+                    /* 销售调整（按天）：单店视图可编辑（正=线下补录，负=异常剔除）；全部店铺视图显示当前视图内各店当日净额只读 */
                     const bdCell = state.shop !== "ALL"
-                      ? `<input type="number" min="0" step="0.01" inputmode="decimal" placeholder="0" value="${budanOf(state.shop, x.date) || ""}" data-shop="${E(state.shop)}" data-date="${x.date}" style="width:82px;padding:2px 6px;border:1px solid var(--line,#dfe6ef);border-radius:6px;background:#fff;color:var(--ink,#162233);font-size:12px;text-align:right" onfocus="this.dataset.old=this.value" onchange="budanCellChange(this)">`
-                      : (() => { const v = budanDayTotal(x.date); return v > 0 ? M2(v) : "-"; })();
-                    return `<tr class="${x.date === state.date ? "sel" : state.rs && x.date >= state.rs && x.date <= state.date ? "insel" : ""}"><td>${x.date}</td><td>${I(x.shopCount)}</td>${oc}${(() => { const hr = hasRetail(x); return `<td>${hr ? M2(x.gmv) : "-"}</td><td>${bdCell}</td><td>${hr ? I(x.units) : "-"}</td><td>${hr ? I(x.orders) : "-"}</td><td>${hr ? I(x.buyers) : "-"}</td><td>${hr ? I(x.visitors) : "-"}</td><td>${P(x.conversion)}</td><td>${M2(x.aov)}</td><td>${M2(x.uvValue)}</td><td>${P(x.refundRate)}</td><td>${hr ? I(x.skuCount) : "-"}</td>`; })()}${sv ? `<td>${x.stockValue != null && x.stockValue > 0 ? M2(x.stockValue) : "-"}</td><td>${x.stockValue > 0 && x.out30dValue > 0 ? (x.stockValue / (x.out30dValue / 30)).toFixed(1) + " 天" : "-"}</td>` : ""}</tr>`;
+                      ? `<input type="number" step="0.01" inputmode="decimal" placeholder="正加/负减" title="正=线下补录，负=异常剔除" value="${budanOf(state.shop, x.date) || ""}" data-shop="${E(state.shop)}" data-date="${x.date}" style="width:82px;padding:2px 6px;border:1px solid var(--line,#dfe6ef);border-radius:6px;background:#fff;color:var(--ink,#162233);font-size:12px;text-align:right" onfocus="this.dataset.old=this.value" onchange="budanCellChange(this)">`
+                      : (() => { const v = visShops.reduce((s, r) => s + budanOf(r, x.date), 0); return v !== 0 ? `<span style="color:${v > 0 ? "#0f9960" : "#cd4243"}">${M2(v)}</span>` : "-"; })();
+                    return `<tr class="${x.date === state.date ? "sel" : state.rs && x.date >= state.rs && x.date <= state.date ? "insel" : ""}"><td>${x.date}</td><td>${I(x.shopCount)}</td>${oc}${(() => { const hr = hasRetail(x); return `<td>${hr ? M2(x.gmv) : "-"}</td>${bdVis ? `<td>${bdCell}</td>` : ""}<td>${hr ? I(x.units) : "-"}</td><td>${hr ? I(x.orders) : "-"}</td><td>${hr ? I(x.buyers) : "-"}</td><td>${hr ? I(x.visitors) : "-"}</td><td>${P(x.conversion)}</td><td>${M2(x.aov)}</td><td>${M2(x.uvValue)}</td><td>${P(x.refundRate)}</td><td>${hr ? I(x.skuCount) : "-"}</td>`; })()}${sv ? `<td>${x.stockValue != null && x.stockValue > 0 ? M2(x.stockValue) : "-"}</td><td>${x.stockValue > 0 && x.out30dValue > 0 ? (x.stockValue / (x.out30dValue / 30)).toFixed(1) + " 天" : "-"}</td>` : ""}</tr>`;
                   })
                   .join("")
               );
@@ -3308,10 +3315,9 @@
             if (!window.html2canvas) {
               await new Promise((res, rej) => {
                 const sc = document.createElement("script");
-                sc.src =
-                  "https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js";
+                sc.src = "vendor/html2canvas.min.js"; /* 本地化，避免 CDN 不可达时导出卡死 */
                 sc.onload = res;
-                sc.onerror = rej;
+                sc.onerror = () => rej(new Error("html2canvas 加载失败"));
                 document.head.appendChild(sc);
               });
             }
@@ -3364,10 +3370,9 @@
             if (!window.html2canvas) {
               await new Promise((res, rej) => {
                 const sc = document.createElement("script");
-                sc.src =
-                  "https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js";
+                sc.src = "vendor/html2canvas.min.js"; /* 本地化，避免 CDN 不可达时导出卡死 */
                 sc.onload = res;
-                sc.onerror = rej;
+                sc.onerror = () => rej(new Error("html2canvas 加载失败"));
                 document.head.appendChild(sc);
               });
             }

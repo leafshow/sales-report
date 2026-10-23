@@ -75,10 +75,8 @@ class Handler(SimpleHTTPRequestHandler):
             if amount is not None:
                 try:
                     amount = round(float(amount), 2)
-                    if amount < 0:
-                        raise ValueError
                 except (TypeError, ValueError):
-                    self._json_response(400, {"error": "amount 需为非负数字或 null"})
+                    self._json_response(400, {"error": "amount 需为数字或 null（正=线下补录，负=异常剔除）"})
                     return
             data = json.loads(self.BUDAN_PATH.read_text(encoding="utf-8")) if self.BUDAN_PATH.exists() else {}
             if amount is None:

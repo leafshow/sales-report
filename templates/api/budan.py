@@ -86,10 +86,8 @@ def handler():
     if amount is not None:
         try:
             amount = round(float(amount), 2)
-            if amount < 0:
-                raise ValueError
         except (TypeError, ValueError):
-            return _resp(400, {"error": "amount 需为非负数字或 null"})
+            return _resp(400, {"error": "amount 需为数字或 null（正=线下补录，负=异常剔除）"})
 
     try:
         # 取远端当前文件（sha 用于覆盖提交）
@@ -110,7 +108,7 @@ def handler():
         if data == json.loads(base64.b64decode(info["content"])):
             return _resp(200, {"ok": True, "data": data, "unchanged": True})
         payload = {
-            "message": f"chore(budan): 更新补单金额 {shop} {date} -> {amount}",
+            "message": f"chore(budan): 更新销售调整 {shop} {date} -> {amount}",
             "content": base64.b64encode(
                 json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
             ).decode("ascii"),
