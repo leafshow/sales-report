@@ -2173,7 +2173,7 @@
           if (m == null || !t[ym]) return null;
           /* 达成率 =（月至今销售金额 - 当月各天补单合计）/ 月任务额 */
           const b = budanMonth(c.shopRaw, ym);
-          return (m - b) / t[ym];
+          return (m + b) / t[ym];
         }
         /* 销售调整读取：BUDAN[shopRaw][date]（按天），未填返回 0；正=加回，负=剔除 */
         function budanOf(shopRaw, date) {
@@ -2230,7 +2230,7 @@
           }
           if (!has)
             return `<div class="mt-row"><div class="mt-card"><div class="label">${ym} 月度任务</div><div class="value muted">未配置</div></div></div>`;
-          const rate = target > 0 && mtdHas ? (mtdSum - budanSum) / target : 0;
+          const rate = target > 0 && mtdHas ? (mtdSum + budanSum) / target : 0;
           const col = (r2) =>
             r2 >= prog
               ? "#0f9960"
@@ -2240,7 +2240,7 @@
           const pct = (v) => Math.min(v * 100, 100).toFixed(1) + "%";
           const bar = (v, c) =>
             `<div class="mt-bar"><div class="fill" style="width:${pct(v)};background:${c}"></div></div>`;
-          const mtdNet = mtdHas ? mtdSum - budanSum : null; /* 销售调整后月至今净额：调整值为净额（正加负减） */
+          const mtdNet = mtdHas ? mtdSum + budanSum : null; /* 销售调整后月至今净额：调整值为净额（正加负减） */
           return `<div class="mt-row">
                   <div class="mt-card"><div class="label">月至今销售金额</div><div class="value">${mtdNet != null ? M2(mtdNet) : "-"}</div><div class="sub">${ym} · 自营按出库口径${budanSum !== 0 ? " · 含销售调整" : ""}</div></div>
                   <div class="mt-card"><div class="label">月任务额</div><div class="value">${M2(target)}</div><div class="sub">${shopsIn.length} 店合计</div></div>
@@ -2342,7 +2342,7 @@
             }
           }
           const sumRate =
-            sumTarget > 0 && sumMtdHas ? (sumMtd - sumBudan) / sumTarget : null;
+            sumTarget > 0 && sumMtdHas ? (sumMtd + sumBudan) / sumTarget : null;
           const lastRow = pairs.length ? pairs[pairs.length - 1].c : null;
           const sumStock = (() => {
             let s = 0;
@@ -2358,7 +2358,7 @@
                 s += c.out30dValue || 0;
             return s;
           })();
-          const totMtdTd = `<td>${sumMtdHas ? M2(sumMtd - sumBudan) : "-"}</td><td>${sumBudan > 0 ? M2(sumBudan) : "-"}</td><td>${sumRate != null ? `<span style="color:${sumRate >= 1 ? "#0f9960" : sumRate >= 0.9 ? "#d9822b" : "#cd4243"}">${(sumRate * 100).toFixed(1)}%</span>` : "-"}</td>`;
+          const totMtdTd = `<td>${sumMtdHas ? M2(sumMtd + sumBudan) : "-"}</td><td>${sumBudan !== 0 ? `<span style="color:${sumBudan > 0 ? "#0f9960" : "#cd4243"}">${M2(sumBudan)}</span>` : "-"}</td><td>${sumRate != null ? `<span style="color:${sumRate >= 1 ? "#0f9960" : sumRate >= 0.9 ? "#d9822b" : "#cd4243"}">${(sumRate * 100).toFixed(1)}%</span>` : "-"}</td>`;
           const totStockTd = sv
             ? `<td>${sumStock > 0 ? M2(sumStock) : "-"}</td><td>${sumStock > 0 && sumOut30 > 0 ? (sumStock / (sumOut30 / 30)).toFixed(1) + " 天" : "-"}</td>`
             : "";
@@ -2409,7 +2409,7 @@
               bd,
               tgt,
               tHas,
-              rate: tgt > 0 && mtdHas ? (mtd - bd) / tgt : null,
+              rate: tgt > 0 && mtdHas ? (mtd + bd) / tgt : null,
               stock,
               out30,
             };
@@ -2427,7 +2427,7 @@
             const outTd = sv
               ? `<td>${K.s("gmvOutbound") > 0 ? M2(K.s("gmvOutbound")) : "-"}</td><td>${K.s("unitsOutbound") > 0 ? I(K.s("unitsOutbound")) : "-"}</td>`
               : "";
-            const mtdTd = `<td>${K.mtdHas ? M2(K.mtd - K.bd) : "-"}</td><td>${K.bd > 0 ? M2(K.bd) : "-"}</td><td>${rateCell(K.rate)}</td>`;
+            const mtdTd = `<td>${K.mtdHas ? M2(K.mtd + K.bd) : "-"}</td><td>${K.bd !== 0 ? `<span style="color:${K.bd > 0 ? "#0f9960" : "#cd4243"}">${M2(K.bd)}</span>` : "-"}</td><td>${rateCell(K.rate)}</td>`;
             const stockTd = sv
               ? `<td>${K.stock > 0 ? M2(K.stock) : "-"}</td><td>${K.stock > 0 && K.out30 > 0 ? (K.stock / (K.out30 / 30)).toFixed(1) + " 天" : "-"}</td>`
               : "";
@@ -2445,7 +2445,7 @@
           const rowHtml = (c, p) => {
               const tdMtd = `<td>${(() => {
                     const m = mtdSales(c);
-                    return m != null ? M2(m - budanMonth(c.shopRaw, (DATA.dates.at(-1) || "").slice(0, 7))) : "-";
+                    return m != null ? M2(m + budanMonth(c.shopRaw, (DATA.dates.at(-1) || "").slice(0, 7))) : "-";
                   })()}</td><td>${(() => {
                     /* 当月销售调整合计（净额，正=线下补录，负=异常剔除），只读展示 */
                     const v = budanMonth(c.shopRaw, (DATA.dates.at(-1) || "").slice(0, 7));
