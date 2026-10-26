@@ -3,22 +3,54 @@
     {
       "src": "api/data.py",
       "use": "@vercel/python",
-      "config": { "includeFiles": "**/report.duckdb" }
+      "config": {
+        "includeFiles": "**/report.duckdb"
+      }
     },
     {
       "src": "api/budan.py",
       "use": "@vercel/python",
-      "config": { "includeFiles": "budan.json" }
+      "config": {
+        "includeFiles": "budan.json"
+      }
     },
-    { "src": "index.html", "use": "@vercel/static" },
-    { "src": "favicon.ico", "use": "@vercel/static" },
-    { "src": "favicon.png", "use": "@vercel/static" },
-    { "src": "budan.json", "use": "@vercel/static" }
+    {
+      "src": "index.html",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "favicon.ico",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "favicon.png",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "budan.json",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "vendor/**",
+      "use": "@vercel/static"
+    }
   ],
   "routes": [
-    { "src": "/api/data", "dest": "/api/data.py" },
-    { "src": "/api/budan", "dest": "/api/budan.py" },
-    { "src": "/budan.json", "dest": "/budan.json" },
-    { "src": "/(.*)", "dest": "/$1" }
+    {
+      "src": "/api/data",
+      "dest": "/api/data.py"
+    },
+    {
+      "src": "/api/budan",
+      "dest": "/api/budan.py"
+    },
+    {
+      "src": "/budan.json",
+      "dest": "/budan.json"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/$1"
+    }
   ]
 }
