@@ -3315,7 +3315,7 @@
             if (!window.html2canvas) {
               await new Promise((res, rej) => {
                 const sc = document.createElement("script");
-                sc.src = "vendor/html2canvas.min.js"; /* 本地化，避免 CDN 不可达时导出卡死 */
+                sc.src = "vendor/html2canvas.min.js?v=20261026"; /* 本地化；版本参数绕过历史 404 缓存 */
                 sc.onload = res;
                 sc.onerror = () => rej(new Error("html2canvas 加载失败"));
                 document.head.appendChild(sc);
@@ -3370,7 +3370,7 @@
             if (!window.html2canvas) {
               await new Promise((res, rej) => {
                 const sc = document.createElement("script");
-                sc.src = "vendor/html2canvas.min.js"; /* 本地化，避免 CDN 不可达时导出卡死 */
+                sc.src = "vendor/html2canvas.min.js?v=20261026"; /* 本地化；版本参数绕过历史 404 缓存 */
                 sc.onload = res;
                 sc.onerror = () => rej(new Error("html2canvas 加载失败"));
                 document.head.appendChild(sc);
