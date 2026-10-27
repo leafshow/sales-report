@@ -2099,11 +2099,11 @@
               el.classList.remove("insel", "selected");
             });
         }
-        /* 首页模块顺序：读取 scripts/section_order.json（构建时注入 __SECTION_ORDER__），按序重排 main 下的 section。
+        /* 首页模块顺序：读取 scripts/section_order.json（构建时注入 [\"conclusion\", \"kpi\", \"gmv-trend\", \"conv-trend\", \"shop-daily\", \"attribution\", \"optimize\", \"stocksec\", \"citysec\", \"category\", \"sku-daily\", \"sku-rise\", \"sku-fall\", \"alerts\", \"month-target\", \"quality\"]），按序重排 main 下的 section。
            同行网格组(.charts 趋势图 / .split 涨跌SKU)以容器为移动单元，保持同行布局 */
         (function applySectionOrder() {
           let order = null;
-          try { order = JSON.parse("__SECTION_ORDER__"); } catch (e) { order = null; }
+          try { order = JSON.parse("[\"conclusion\", \"kpi\", \"gmv-trend\", \"conv-trend\", \"shop-daily\", \"attribution\", \"optimize\", \"stocksec\", \"citysec\", \"category\", \"sku-daily\", \"sku-rise\", \"sku-fall\", \"alerts\", \"month-target\", \"quality\"]"); } catch (e) { order = null; }
           if (!Array.isArray(order) || !order.length) return;
           const main = document.querySelector("main");
           if (!main) return;

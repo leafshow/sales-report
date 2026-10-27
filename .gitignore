@@ -18,6 +18,9 @@ templates/api/data/report.duckdb
 templates/api/data/data.json
 templates/api/data/data_*.json
 
+# ERP 凭证（本地，不入库）
+scripts/erp.local.json
+
 # 已弃用
 index.embedded.html
 .vercel
