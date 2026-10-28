@@ -28,7 +28,7 @@ HIDDEN_SHOPS  = config.HIDDEN_SHOPS   # 隐藏店铺：仍解析入库存数据�
 SHOP_START_DATES = config.SHOP_START_DATES  # 店铺数据起始日期：早于此的空报表不告警（开业前正常形态）
 def _bark_notify(data):
     """构建完成后通过 Bark 推送各平台店铺日报更新情况。
-    推送内容：全平台汇总（GMV/环比/订单/访客/转化）→ 每平台小计+店铺明细
+    推送内容：全平台汇总（GMV/环比/达成/订单/访客/转化）→ 每平台小计（含达成率）+店铺明细
     （未更新店铺列在平台段尾）→ 质量提示（缺失日期明细）。
     开业前（早于 shop_start_dates）店铺不列。失败仅打印警告，不影响构建结果。"""
     base = (config.BARK_URL or "").rstrip("/")
@@ -39,8 +39,18 @@ def _bark_notify(data):
     sd = SHOP_START_DATES
     latest_row = next((x for x in data["overall"] if x["date"] == latest), None)
     prev_row = next((x for x in data["overall"] if x["date"] < latest), None)
+    def _ach(row):
+        bl = (row.get("baseline") or {}).get("gmv") if row else None
+        g = (row.get("gmv") or 0) if row else 0
+        return g / bl * 100 if bl else None
+
+    def _dot(pct):
+        if pct is None:
+            return "⚪"
+        return "🟢" if pct >= 100 else ("🟡" if pct >= 70 else "🔴")
+
     by_plat = defaultdict(list)
-    plat_totals = defaultdict(lambda: {"gmv": 0.0, "updated": 0, "missing": []})
+    plat_totals = defaultdict(lambda: {"gmv": 0.0, "bl": 0.0, "updated": 0, "missing": []})
     for key in SHOP_META:  # 仅可见店铺，按注册顺序
         plat = key.split("|", 1)[0]
         rows = data["shopDaily"].get(key, [])
@@ -49,8 +59,16 @@ def _bark_notify(data):
             continue  # 开业前：正常无数据，不推送
         disp = SHOP_META[key][0]
         if row:
-            by_plat[plat].append(f"{disp}: ¥{row['gmv']:,.0f}")
+            pct = _ach(row)
+            if pct is not None:
+                line = f"{disp} ¥{row['gmv']:,.0f} · {pct:.0f}%"
+            else:
+                line = f"{disp} ¥{row['gmv']:,.0f}"
+            by_plat[plat].append(line)
             plat_totals[plat]["gmv"] += row["gmv"] or 0
+            bl = (row.get("baseline") or {}).get("gmv")
+            if bl:
+                plat_totals[plat]["bl"] += bl
             plat_totals[plat]["updated"] += 1
         else:
             by_plat[plat].append(f"{disp}: 未更新")
@@ -58,40 +76,53 @@ def _bark_notify(data):
     if not any(by_plat.values()):
         return
     plat_names = PLATFORMS
-    lines = [f"📅 {latest} 日报更新"]
+    lines = []
     if latest_row:
         gmv = latest_row.get("gmv") or 0
-        seg = [f"全平台 GMV ¥{gmv:,.0f}"]
+        ach = _ach(latest_row)
+        seg = [f"GMV ¥{gmv:,.0f}"]
+        if ach is not None:
+            seg.append(f"达成{ach:.0f}%")
         if prev_row and (prev_row.get("gmv") or 0) > 0:
             seg.append(f"环比 {(gmv / prev_row['gmv'] - 1) * 100:+.1f}%")
-        seg.append(f"订单 {latest_row.get('orders') or 0:,.0f}")
-        seg.append(f"访客 {latest_row.get('visitors') or 0:,.0f}")
+        lines.append(" · ".join(seg))
+        lines.append(f"订单 {latest_row.get('orders') or 0:,.0f} · 访客 {latest_row.get('visitors') or 0:,.0f}")
         conv = latest_row.get("conversion")
         if conv is not None:
-            seg.append(f"转化 {conv * 100:.2f}%")
-        lines.append(" | ".join(seg))
+            lines[-1] += f" · 转化 {conv * 100:.2f}%"
+        lines.append("")
     for plat in PLATFORM_DIRS:
         if plat not in by_plat:
             continue
         tt = plat_totals[plat]
-        head = f"— {plat_names.get(plat, plat)} ¥{tt['gmv']:,.0f} ({tt['updated']}店)"
+        pct = tt["gmv"] / tt["bl"] * 100 if tt["bl"] else None
+        head = f"【{plat_names.get(plat, plat)}】¥{tt['gmv']:,.0f}"
+        if pct is not None:
+            head += f" · {pct:.0f}%"
         if tt["missing"]:
             head += f" 未更新{len(tt['missing'])}"
         lines.append(head)
         lines.extend(by_plat[plat])
+        lines.append("")
     missing = len(data["quality"].get("missingDates", []))
     if missing:
         lines.append(f"⚠️ 缺失日期 {missing} 天: {', '.join(data['quality'].get('missingDates', [])[:5])}{'…' if missing > 5 else ''}")
-    body = "\n".join(lines)
+    body = "\n".join(lines).strip()
     try:
-        qs = urllib.parse.urlencode({
+        key = base.rsplit("/", 1)[1]
+        server = base.rsplit("/", 1)[0]
+        payload = json.dumps({
+            "device_key": key,
             "title": f"日报 {latest}",
             "body": body,
             "group": "shop-daily",
             "icon": "https://vercel.com/icon",
-        })
-        url = f"{base}/push?{qs}"
-        req = urllib.request.Request(url)
+        }, ensure_ascii=False).encode("utf-8")
+        req = urllib.request.Request(
+            f"{server}/push",
+            data=payload,
+            headers={"Content-Type": "application/json; charset=utf-8"},
+        )
         with urllib.request.urlopen(req, timeout=10) as resp:
             print(f"🔔 Bark 推送完成: {resp.status}")
     except Exception as e:
