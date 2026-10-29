@@ -175,6 +175,12 @@
         color: var(--accent, var(--muted));
         margin-left: 4px;
       }
+      /* 月度总览标题中的店铺名：前台黑色加粗加大，醒目展示 */
+      #daily-title-shop {
+        font-size: 20px;
+        font-weight: 800;
+        color: #111;
+      }
       .grid10 {
         display: grid;
         grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -186,8 +192,10 @@
       /* 月度任务进度卡片：月至今/任务额/达成率/时间进度 一行四卡+底部进度条 */
       .mt-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:11px;margin-bottom:12px}
       .mt-card{border:1px solid var(--line);border-radius:13px;padding:12px 13px;background:linear-gradient(180deg,#fff,#fafcff)}
-      .mt-card .value{font-size:20px;font-weight:780;margin-top:5px}
-      .mt-card .sub{color:var(--muted);font-size:11px;margin-top:3px}
+      /* 月度任务卡：标签/小字加深加大加粗，提升醒目度（空间充足） */
+      .mt-card .label{color:#333;font-size:14px;font-weight:700}
+      .mt-card .value{font-size:22px;font-weight:800;margin-top:5px}
+      .mt-card .sub{color:#444;font-size:13px;font-weight:600;margin-top:3px}
       .mt-bar{height:6px;border-radius:4px;background:#edf1f5;overflow:hidden;margin-top:8px;position:relative}
       .mt-bar .fill{height:100%;border-radius:4px}
       .mt-bar .tick{position:absolute;top:-2px;width:2px;height:10px;background:#5c7080;border-radius:1px}
@@ -3327,6 +3335,39 @@
             shot.style.display = "flex";
             shot.style.flexDirection = "column";
             shot.style.gap = "12px";
+            /* 导出图可读性增强：字号/字重/灰度覆盖仅作用于克隆容器，页面显示不受影响 */
+            {
+              const st = document.createElement("style");
+              st.textContent = `
+                #shoptable-shot, #shoptable-shot * { font-size: 13px; font-weight: 500; color: #222; }
+                #shoptable-shot th { font-size: 13px !important; font-weight: 700 !important; }
+                #shoptable-shot td, #shoptable-shot span { font-size: 14px !important; font-weight: 600 !important; }
+                #shoptable-shot .group-head td { font-size: 14px !important; font-weight: 700 !important; color: #33507d !important; }
+                #shoptable-shot .total-row td { font-size: 14px !important; font-weight: 700 !important; color: #111 !important; }
+                #shoptable-shot .muted, #shoptable-shot .sub { color: #444 !important; }
+                /* 导出图标题行：居中加粗放大，店铺名保持醒目 */
+                #shoptable-shot .head > div { text-align: center; width: 100%; }
+                #shoptable-shot h2, #shoptable-shot #shopsec-title-shop { font-size: 22px !important; font-weight: 800 !important; text-align: center; }
+                #shoptable-shot #shopsec-title-shop { color: #111 !important; }
+                #shoptable-shot .note { text-align: center; }
+                #shoptable-shot .mt-card .label { font-size: 14px !important; font-weight: 700 !important; color: #333 !important; }
+                #shoptable-shot .mt-card .value { font-size: 22px !important; font-weight: 800 !important; }
+                #shoptable-shot .mt-card .sub { font-size: 13px !important; font-weight: 600 !important; color: #444 !important; }
+              `;
+              shot.append(st);
+              /* 宽表完整出图：导出容器放开宽度/滚动裁剪，按表格自然宽度展开 */
+              shot.style.maxWidth = "none";
+              shot.style.overflow = "visible";
+              shot.style.width = "max-content";
+              shot.querySelectorAll(".wrap").forEach((w) => {
+                w.style.maxWidth = "none";
+                w.style.overflow = "visible";
+              });
+              shot.querySelectorAll("table").forEach((t) => {
+                t.style.width = "max-content";
+                t.style.minWidth = "0";
+              });
+            }
             shot.append(
               sec.querySelector(".head > div").cloneNode(true),
               document.getElementById("shop-mt-cards").cloneNode(true),
@@ -3339,7 +3380,7 @@
             });
             const canvas = await html2canvas(shot, {
               backgroundColor: "#fff",
-              scale: 2,
+              scale: 3,
             });
             shot.style.display = "none";
             const a = document.createElement("a");
@@ -3391,13 +3432,45 @@
                 document.getElementById("daily-table").cloneNode(true),
               );
             }
+            /* 导出图可读性增强：字号/字重/灰度覆盖仅作用于克隆容器，页面显示不受影响 */
+            {
+              const st = document.createElement("style");
+              st.textContent = `
+                #dailysec-shot, #dailysec-shot * { font-size: 13px; font-weight: 500; color: #222; }
+                #dailysec-shot th { font-size: 13px !important; font-weight: 700 !important; }
+                #dailysec-shot td, #dailysec-shot span { font-size: 14px !important; font-weight: 600 !important; }
+                #dailysec-shot .total-row td { font-size: 14px !important; font-weight: 700 !important; color: #111 !important; }
+                #dailysec-shot .muted, #dailysec-shot .sub { color: #444 !important; }
+                /* 导出图标题行：居中加粗放大，店铺名保持醒目 */
+                #dailysec-shot .head > div { text-align: center; width: 100%; }
+                #dailysec-shot h2, #dailysec-shot #daily-title-month { font-size: 22px !important; font-weight: 800 !important; text-align: center; }
+                #dailysec-shot #daily-title-shop { font-size: 22px !important; font-weight: 800 !important; color: #111 !important; }
+                #dailysec-shot .note { text-align: center; }
+                #dailysec-shot .mt-card .label { font-size: 14px !important; font-weight: 700 !important; color: #333 !important; }
+                #dailysec-shot .mt-card .value { font-size: 22px !important; font-weight: 800 !important; }
+                #dailysec-shot .mt-card .sub { font-size: 13px !important; font-weight: 600 !important; color: #444 !important; }
+              `;
+              shot.append(st);
+              /* 宽表完整出图：导出容器放开宽度/滚动裁剪，按表格自然宽度展开 */
+              shot.style.maxWidth = "none";
+              shot.style.overflow = "visible";
+              shot.style.width = "max-content";
+              shot.querySelectorAll(".wrap").forEach((w) => {
+                w.style.maxWidth = "none";
+                w.style.overflow = "visible";
+              });
+              shot.querySelectorAll("table").forEach((t) => {
+                t.style.width = "max-content";
+                t.style.minWidth = "0";
+              });
+            }
             /* 输入框替换为纯文本：html2canvas 渲染 input 易与文字重合，导出图只需数值。
                注意 M2 是 init() 内局部量，此处用 Number.toLocaleString 就地格式化 */
             shot.querySelectorAll("input[type='number']").forEach((inp) => {
               const txt = document.createElement("span");
               const v = +inp.value;
               txt.textContent = inp.value && v > 0 ? "¥" + v.toLocaleString("zh-CN", { minimumFractionDigits: 2 }) : "-";
-              txt.style.cssText = "font-size:12px";
+              txt.style.cssText = "font-size:13px;font-weight:500";
               inp.replaceWith(txt);
             });
             /* 合并「当日 SKU 表现」标题+表格一并导出 */
@@ -3415,7 +3488,7 @@
             });
             const canvas = await html2canvas(shot, {
               backgroundColor: "#fff",
-              scale: 2,
+              scale: 3,
             });
             shot.style.display = "none";
             const a = document.createElement("a");
